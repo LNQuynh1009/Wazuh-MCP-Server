@@ -2,6 +2,19 @@
 The server.py is to run a mcp server to connect to wazuh.
 The features are still being developed.
 To use it please config your claude_desktop_config.json.
+
+Available tools in this MCP Server:
+OpenSearch/Wazuh Security Tools
+- ping : Test connection to Wazuh API
+- list_agents : List registered Wazuh agents (default: 5)
+- search_alerts : Run search queries against OpenSearch Wazuh alert indices
+- check_alert_iocs : Extract and check all IOCs (IPs, domains, hashes) from Wazuh alert data
+Threat Intelligence Tools
+- virustotal_check_ip : Check IP address reputation on VirusTotal
+- virustotal_check_domain : Check domain reputation on VirusTotal
+- virustotal_check_file_hash : Check file hash (MD5/SHA1/SHA256) on VirusTotal
+- virustotal_check_url : Check URL reputation on VirusTotal
+- abuseipdb_check_ip : Check IP reputation on AbuseIPDB
 <pre>
 {
   "mcpServers": {
