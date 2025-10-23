@@ -40,6 +40,8 @@ OpenSearch/Wazuh Security Tools and Threat Intelligence Tools
 
 
 # Members
-Le Nhu Quynh: Leader
-Tran Thi Thu Phuong: Secretary
-Tran Minh Tu: Member
+- Le Nhu Quynh: Leader
+
+- Tran Thi Thu Phuong: Secretary
+
+- Tran Minh Tu: Member
