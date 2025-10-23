@@ -36,7 +36,7 @@ OpenSearch/Wazuh Security Tools and Threat Intelligence Tools
     }
   }
 }
-<pre>
+</pre>
 
 
 # Members
