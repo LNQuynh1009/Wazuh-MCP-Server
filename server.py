@@ -3,6 +3,8 @@ import requests
 import json
 import re
 import base64
+import pandas as pd
+from datetime import datetime, timedelta
 from fastmcp import FastMCP
 from requests.auth import HTTPBasicAuth
 
@@ -404,6 +406,95 @@ def check_alert_iocs(alert_json: str):
         return results
     except Exception as e:
         return {"error": str(e)}
+
+@mcp.tool()
+def classify_and_export_alerts():
+    """Fetch last 24h Wazuh alerts, classify as TP/FP, and export TPs to Excel."""
+    try:
+        host = os.getenv("OPENSEARCH_HOST")
+        port = os.getenv("OPENSEARCH_PORT", "9200")
+        user = os.getenv("OPENSEARCH_USER")
+        password = os.getenv("OPENSEARCH_PASS")
+        verify_ssl = os.getenv("OPENSEARCH_SSL_VERIFY", "true").lower() == "true"
+
+        # --- Step 1: Build 24h time range query ---
+        now = datetime.utcnow()
+        last_24h = now - timedelta(hours=24)
+
+        query = {
+            "size": 100,  # limit results for demo; adjust as needed
+            "query": {
+                "range": {
+                    "@timestamp": {
+                        "gte": last_24h.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "lte": now.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "format": "strict_date_optional_time"
+                    }
+                }
+            },
+            "sort": [{"@timestamp": {"order": "desc"}}]
+        }
+
+        url = f"{host}:{port}/wazuh-alerts-*/_search"
+        response = requests.get(url, auth=HTTPBasicAuth(user, password), json=query, verify=verify_ssl)
+        if response.status_code != 200:
+            return {"error": f"OpenSearch query failed: {response.text}"}
+
+        alerts = [hit["_source"] for hit in response.json().get("hits", {}).get("hits", [])]
+
+        if not alerts:
+            return {"message": "No alerts found in the last 24 hours."}
+
+        # --- Step 2: Classify alerts ---
+        classified_alerts = []
+        tp_alerts = []
+
+        for alert in alerts:
+            classification = "FP"
+
+            # Get relevant fields
+            rule = alert.get("rule", {})
+            level = rule.get("level", 0)
+            description = rule.get("description", "").lower()
+            src_ip = alert.get("srcip")
+            dst_ip = alert.get("dstip")
+
+            # IOC check using your built-in tool
+            if src_ip:
+                ioc_result = check_alert_iocs(json.dumps(alert))
+                if ioc_result.get("summary", {}).get("malicious_ips", 0) > 0:
+                    classification = "TP"
+
+            # Heuristic rules
+            if level >= 10 or "malware" in description or "ransom" in description or "exploit" in description:
+                classification = "TP"
+
+            alert["classification"] = classification
+            classified_alerts.append(alert)
+            if classification == "TP":
+                tp_alerts.append(alert)
+
+        # --- Step 3: Export TP alerts to Excel ---
+        if tp_alerts:
+            df = pd.DataFrame(tp_alerts)
+            output_file = f"true_positive_alerts_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            df.to_excel(output_file, index=False)
+        else:
+            output_file = None
+
+        # --- Step 4: Return summary ---
+        summary = {
+            "total_alerts": len(alerts),
+            "true_positives": len(tp_alerts),
+            "false_positives": len(alerts) - len(tp_alerts),
+            "exported_file": output_file or "No TPs found"
+        }
+
+        return summary
+
+    except Exception as e:
+        return {"error": str(e)}
+
 
 if __name__ == "__main__":
     print(f"Starting Wazuh MCP server on {BASE_URL}...")
