@@ -407,6 +407,96 @@ def check_alert_iocs(alert_json: str):
     except Exception as e:
         return {"error": str(e)}
 
+# ========== ALERT CLASSIFICATION HELPERS (Based on Playbook) ==========
+
+def classify_phishing(alert):
+    desc = alert.get("rule", {}).get("description", "").lower()
+    url = alert.get("data", {}).get("url") or alert.get("url")
+    verdict = "FP"
+    reason = "No malicious URL found"
+
+    if url:
+        vt = virustotal_check_url(url)
+        if vt.get("verdict") == "MALICIOUS":
+            verdict = "TP"
+            reason = f"Malicious URL detected ({url}) per VirusTotal"
+    elif "phishing" in desc or "email" in desc:
+        verdict = "TP"
+        reason = "Phishing-related rule triggered"
+    
+    return {"category": "phishing", "classification": verdict, "reason": reason}
+
+
+def classify_malware(alert):
+    desc = alert.get("rule", {}).get("description", "").lower()
+    file_hash = alert.get("data", {}).get("md5") or alert.get("data", {}).get("sha256")
+    verdict = "FP"
+    reason = "No malicious file found"
+
+    if file_hash:
+        vt = virustotal_check_file_hash(file_hash)
+        if vt.get("verdict") == "MALICIOUS":
+            verdict = "TP"
+            reason = f"Malicious file hash {file_hash}"
+    elif "malware" in desc or "trojan" in desc or "ransom" in desc:
+        verdict = "TP"
+        reason = "Malware keyword detected in rule description"
+    
+    return {"category": "malware", "classification": verdict, "reason": reason}
+
+
+def classify_ip_connection(alert):
+    src_ip = alert.get("srcip")
+    verdict = "FP"
+    reason = "No public malicious IP"
+
+    if src_ip:
+        intel = check_alert_iocs(json.dumps(alert))
+        if intel.get("summary", {}).get("malicious_ips", 0) > 0:
+            verdict = "TP"
+            reason = f"Connection to malicious IP {src_ip}"
+    
+    return {"category": "ip_connection", "classification": verdict, "reason": reason}
+
+
+def classify_web_attack(alert):
+    desc = alert.get("rule", {}).get("description", "").lower()
+    verdict = "FP"
+    reason = "No exploit indicators found"
+
+    keywords = ["xss", "sql injection", "rce", "directory traversal", "webshell"]
+    if any(k in desc for k in keywords):
+        verdict = "TP"
+        reason = f"Web attack pattern detected: {desc}"
+    
+    return {"category": "web_attack", "classification": verdict, "reason": reason}
+
+
+def classify_bruteforce(alert):
+    desc = alert.get("rule", {}).get("description", "").lower()
+    verdict = "FP"
+    reason = "No repeated authentication attempts"
+
+    if "brute" in desc or "login failed" in desc:
+        verdict = "TP"
+        reason = "Detected brute-force pattern"
+    
+    return {"category": "bruteforce", "classification": verdict, "reason": reason}
+
+
+def classify_login_anomaly(alert):
+    desc = alert.get("rule", {}).get("description", "").lower()
+    verdict = "FP"
+    reason = "Normal login activity"
+
+    if "login" in desc and "unusual" in desc:
+        verdict = "TP"
+        reason = "Detected login from abnormal IP or region"
+    
+    return {"category": "login_anomaly", "classification": verdict, "reason": reason}
+
+# ========== CLASSIFY AND THEN EXPORT IT TO EXCEL (Based on Playbook) ==========
+
 @mcp.tool()
 def classify_and_export_alerts():
     """Fetch last 24h Wazuh alerts, classify as TP/FP, and export TPs to Excel."""
@@ -450,28 +540,27 @@ def classify_and_export_alerts():
         tp_alerts = []
 
         for alert in alerts:
-            classification = "FP"
+            desc = alert.get("rule", {}).get("description", "").lower()
+            classification = {"category": "general", "classification": "FP", "reason": "Unclassified"}
 
-            # Get relevant fields
-            rule = alert.get("rule", {})
-            level = rule.get("level", 0)
-            description = rule.get("description", "").lower()
-            src_ip = alert.get("srcip")
-            dst_ip = alert.get("dstip")
+            # Identify alert type from playbook categories
+            if "phish" in desc or "email" in desc:
+                classification = classify_phishing(alert)
+            elif "malware" in desc or "trojan" in desc or "ransom" in desc:
+                classification = classify_malware(alert)
+            elif "ip" in desc or "domain" in desc:
+                classification = classify_ip_connection(alert)
+            elif "web" in desc or "sql" in desc or "xss" in desc:
+                classification = classify_web_attack(alert)
+            elif "brute" in desc or "password" in desc:
+                classification = classify_bruteforce(alert)
+            elif "login" in desc or "user" in desc:
+                classification = classify_login_anomaly(alert)
 
-            # IOC check using your built-in tool
-            if src_ip:
-                ioc_result = check_alert_iocs(json.dumps(alert))
-                if ioc_result.get("summary", {}).get("malicious_ips", 0) > 0:
-                    classification = "TP"
+            alert.update(classification)
 
-            # Heuristic rules
-            if level >= 10 or "malware" in description or "ransom" in description or "exploit" in description:
-                classification = "TP"
-
-            alert["classification"] = classification
             classified_alerts.append(alert)
-            if classification == "TP":
+            if classification["classification"] == "TP":
                 tp_alerts.append(alert)
 
         # --- Step 3: Export TP alerts to Excel ---
