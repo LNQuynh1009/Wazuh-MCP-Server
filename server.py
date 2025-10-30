@@ -512,7 +512,7 @@ def classify_and_export_alerts():
         last_24h = now - timedelta(hours=24)
 
         query = {
-            "size": 100,  # limit results for demo; adjust as needed
+            "size": 1000,  # limit results for demo; adjust as needed
             "query": {
                 "range": {
                     "@timestamp": {
