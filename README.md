@@ -4,6 +4,8 @@ The features are still being developed.
 To use it please config your claude_desktop_config.json.
 
 Available tools in this MCP Server:
+
+
 Wazuh & OpenSearch Tools
 - opensearch-mcp-server:ping. Test connection to the Wazuh API
 - opensearch-mcp-server:list_agents. List registered Wazuh agents (default: 5, customizable limit)
