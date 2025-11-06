@@ -9,6 +9,8 @@ Wazuh & OpenSearch Tools
 - opensearch-mcp-server:list_agents. List registered Wazuh agents (default: 5, customizable limit)
 - opensearch-mcp-server:search_alerts. Run search queries directly against OpenSearch Wazuh alert indices
 - opensearch-mcp-server:classify_and_export_alerts. Fetch last 24h Wazuh alerts, classify as True Positive/False Positive, and export TPs to Excel
+
+
 Threat Intelligence Tools
 VirusTotal Integration:
 - virustotal_check_ip - Check IP address reputation
