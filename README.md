@@ -14,12 +14,10 @@ Wazuh & OpenSearch Tools
 
 
 Threat Intelligence Tools
-VirusTotal Integration:
 - virustotal_check_ip - Check IP address reputation
 - virustotal_check_domain - Check domain reputation
 - virustotal_check_file_hash - Check file hashes (MD5/SHA1/SHA256)
 - virustotal_check_url - Check URL reputation
-AbuseIPDB Integration:
 - abuseipdb_check_ip - Check IP reputation with abuse confidence scores
 - Automated IOC Analysis: check_alert_iocs - Extract and check all IOCs (IPs, domains, hashes) from Wazuh alert data automatically
 <pre>
