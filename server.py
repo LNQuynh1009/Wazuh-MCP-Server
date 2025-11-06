@@ -7,8 +7,10 @@ import pandas as pd
 from datetime import datetime, timedelta
 from fastmcp import FastMCP
 from requests.auth import HTTPBasicAuth
+from dotenv import load_dotenv
 
 # === Load environment variables ===
+load_dotenv()
 WAZUH_HOST = os.getenv("WAZUH_HOST", "https://localhost")
 WAZUH_PORT = os.getenv("WAZUH_PORT", "55000")
 WAZUH_USER = os.getenv("WAZUH_USER", "wazuh-wui")
@@ -102,7 +104,10 @@ def virustotal_check_ip(ip: str):
         return {"error": "VIRUSTOTAL_API_KEY not set in environment"}
     
     try:
-        headers = {"x-apikey": VIRUSTOTAL_API_KEY}
+        headers = {
+            "accept": "application/json",
+            "x-apikey": VIRUSTOTAL_API_KEY
+            }
         response = requests.get(
             f"{VIRUSTOTAL_BASE_URL}/ip_addresses/{ip}",
             headers=headers
@@ -146,7 +151,9 @@ def virustotal_check_domain(domain: str):
         return {"error": "VIRUSTOTAL_API_KEY not set in environment"}
     
     try:
-        headers = {"x-apikey": VIRUSTOTAL_API_KEY}
+        headers = {
+            "accept": "application/json",
+            "x-apikey": VIRUSTOTAL_API_KEY}
         response = requests.get(
             f"{VIRUSTOTAL_BASE_URL}/domains/{domain}",
             headers=headers
@@ -190,7 +197,9 @@ def virustotal_check_file_hash(file_hash: str):
         return {"error": "VIRUSTOTAL_API_KEY not set in environment"}
     
     try:
-        headers = {"x-apikey": VIRUSTOTAL_API_KEY}
+        headers = {
+            "accept": "application/json",
+            "x-apikey": VIRUSTOTAL_API_KEY}
         response = requests.get(
             f"{VIRUSTOTAL_BASE_URL}/files/{file_hash}",
             headers=headers
@@ -239,7 +248,9 @@ def virustotal_check_url(url: str):
         # VirusTotal uses base64 URL-safe encoding for URL identifiers
         url_id = base64.urlsafe_b64encode(url.encode()).decode().strip("=")
         
-        headers = {"x-apikey": VIRUSTOTAL_API_KEY}
+        headers = {
+            "accept": "application/json",
+            "x-apikey": VIRUSTOTAL_API_KEY}
         response = requests.get(
             f"{VIRUSTOTAL_BASE_URL}/urls/{url_id}",
             headers=headers
@@ -512,7 +523,7 @@ def classify_and_export_alerts():
         last_24h = now - timedelta(hours=24)
 
         query = {
-            "size": 1000,  # limit results for demo; adjust as needed
+            "size": 200,  # limit results for demo; adjust as needed
             "query": {
                 "range": {
                     "@timestamp": {
