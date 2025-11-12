@@ -1,0 +1,108 @@
+{
+  "_index": "wazuh-alerts-4.x-2025.10.30",
+  "_id": "lJzwM5oBLGEc15DHXGWd",
+  "_version": 1,
+  "_score": null,
+  "_source": {
+    "syscheck": {
+      "uname_after": "root",
+      "mtime_after": "2025-09-13T21:32:00",
+      "size_after": "43",
+      "gid_after": "0",
+      "mode": "scheduled",
+      "path": "/etc/systemd/system/snapd.mounts.target.wants/snap-firefox-6738.mount",
+      "sha1_after": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+      "gname_after": "root",
+      "uid_after": "0",
+      "perm_after": "rwxrwxrwx",
+      "event": "deleted",
+      "md5_after": "d41d8cd98f00b204e9800998ecf8427e",
+      "sha256_after": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "inode_after": 264111
+    },
+    "input": {
+      "type": "log"
+    },
+    "agent": {
+      "name": "wazuh-server",
+      "id": "000"
+    },
+    "manager": {
+      "name": "wazuh-server"
+    },
+    "rule": {
+      "mail": false,
+      "level": 7,
+      "pci_dss": [
+        "11.5"
+      ],
+      "hipaa": [
+        "164.312.c.1",
+        "164.312.c.2"
+      ],
+      "tsc": [
+        "PI1.4",
+        "PI1.5",
+        "CC6.1",
+        "CC6.8",
+        "CC7.2",
+        "CC7.3"
+      ],
+      "description": "File deleted.",
+      "groups": [
+        "ossec",
+        "syscheck",
+        "syscheck_entry_deleted",
+        "syscheck_file"
+      ],
+      "nist_800_53": [
+        "SI.7"
+      ],
+      "gdpr": [
+        "II_5.1.f"
+      ],
+      "firedtimes": 3,
+      "mitre": {
+        "technique": [
+          "File Deletion",
+          "Data Destruction"
+        ],
+        "id": [
+          "T1070.004",
+          "T1485"
+        ],
+        "tactic": [
+          "Defense Evasion",
+          "Impact"
+        ]
+      },
+      "id": "553",
+      "gpg13": [
+        "4.11"
+      ]
+    },
+    "location": "syscheck",
+    "decoder": {
+      "name": "syscheck_deleted"
+    },
+    "id": "1761807978.9792",
+    "full_log": "File '/etc/systemd/system/snapd.mounts.target.wants/snap-firefox-6738.mount' deleted\nMode: scheduled\n",
+    "timestamp": "2025-10-30T03:06:18.171-0400"
+  },
+  "fields": {
+    "syscheck.mtime_after": [
+      "2025-09-13T21:32:00.000Z"
+    ],
+    "timestamp": [
+      "2025-10-30T07:06:18.171Z"
+    ]
+  },
+  "highlight": {
+    "manager.name": [
+      "@opensearch-dashboards-highlighted-field@wazuh-server@/opensearch-dashboards-highlighted-field@"
+    ]
+  },
+  "sort": [
+    1761807978171
+  ]
+}
