@@ -3,6 +3,8 @@ The server.py is to run a mcp server to connect to wazuh.
 The features are still being developed.
 To use it please config your claude_desktop_config.json.
 
+*!!! Important not: if you want to use soc-pipeline.py make sure you have wazuh and the hive (5.2) installed. And please configed the .env file in the same folder as the soc-pipeline.py.
+
 Available tools in this MCP Server:
 
 
