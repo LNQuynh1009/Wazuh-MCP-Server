@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""
-wazuh_pipeline.py
-Full Wazuh -> Hybrid Classifier -> TheHive pipeline (real-time streamer).
-"""
-
 import os
 import time
 import json
@@ -18,12 +13,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Optional: Anthropic client
-'''
 try:
     from anthropic import Anthropic
 except Exception:
     Anthropic = None
-'''
 
 # ========== Configuration (from env) ==========
 WAZUH_HOST = os.getenv("WAZUH_HOST", "https://localhost")
@@ -48,7 +41,7 @@ ABUSEIPDB_BASE_URL = "https://api.abuseipdb.com/api/v2"
 # Claude / Anthropic
 # Support both names: CLAUDE_API_KEY or ANTHROPIC_API_KEY
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-latest")
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5")
 
 # TheHive
 THEHIVE_URL = os.getenv("THEHIVE_URL")
@@ -56,7 +49,7 @@ THEHIVE_API_KEY = os.getenv("THEHIVE_API_KEY")
 THEHIVE_VERIFY_SSL = os.getenv("THEHIVE_VERIFY_SSL", "false").lower() == "true"
 
 # Pipeline tuning
-POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "120"))
+POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "30"))
 MAX_FETCH = int(os.getenv("MAX_FETCH", "500"))
 
 # Persist files
@@ -463,7 +456,7 @@ def alert_streamer(poll_interval=POLL_INTERVAL_SECONDS, max_batch=MAX_FETCH):
                 level = alert.get("rule", {}).get("level", 0)
                 call_ai = False
                 if playbook_result.get("classification") == "TP" or level >= 8:
-                    call_ai = False #Modified
+                    call_ai = True #Modified
                 if call_ai:
                     try:
                         ai_result = claude_classify_alert(alert)
