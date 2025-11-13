@@ -63,7 +63,7 @@ OPENSEARCH_PASS=youropensearchpasswd
 OPENSEARCH_SSL_VERIFY=false
 
 # Claude API
-#ANTHROPIC_API_KEY=your_key_here
+#ANTHROPIC_API_KEY=your_key_here #Uncomment this if you use AI features
 
 # VirusTotal
 VIRUSTOTAL_API_KEY=YourVTKey
