@@ -3,7 +3,7 @@ The server.py is to run a mcp server to connect to wazuh.
 The features are still being developed.
 To use it please config your claude_desktop_config.json.
 
-*!!! Important note: if you want to use soc-pipeline.py make sure you have wazuh and the hive (5.2) installed. And please configed the .env file in the same folder as the soc-pipeline.py.
+*!!! Important note: if you want to use soc-pipeline.py make sure you have wazuh and the hive (5.2) installed. And please configed the .env file in the same folder as the soc-pipeline.py. The AI feature (Claude) is coming soon.
 
 Available tools in this MCP Server:
 
@@ -46,6 +46,36 @@ Threat Intelligence Tools
 }
 </pre>
 
+
+Here is the .env example. Please use this with the soc-pipeline.py
+<pre>
+# Wazuh
+WAZUH_HOST=https://wazuh-ip
+WAZUH_PORT=55000
+WAZUH_USER=yourpasswd
+WAZUH_PASS=yourpasswd
+
+# OpenSearch
+OPENSEARCH_HOST=https://wazuh-ip
+OPENSEARCH_PORT=9200
+OPENSEARCH_USER=youropensearchpasswd
+OPENSEARCH_PASS=youropensearchpasswd
+OPENSEARCH_SSL_VERIFY=false
+
+# Claude API
+#ANTHROPIC_API_KEY=your_key_here
+
+# VirusTotal
+VIRUSTOTAL_API_KEY=YourVTKey
+
+# AbuseIPDB
+ABUSEIPDB_API_KEY=YourAbuseIPKey
+
+# TheHive
+THEHIVE_URL=http://thehive-ip:9000
+THEHIVE_API_KEY=thehiveAPI
+THEHIVE_SSL_VERIFY=false
+</pre>
 
 # Members
 - Le Nhu Quynh: Leader
