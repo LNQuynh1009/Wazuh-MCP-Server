@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import os
 import time
 import json
@@ -11,7 +12,6 @@ from dotenv import load_dotenv
 
 # Load .env from current working directory
 load_dotenv()
-
 # Optional: Anthropic client
 try:
     from anthropic import Anthropic
@@ -50,7 +50,7 @@ THEHIVE_VERIFY_SSL = os.getenv("THEHIVE_VERIFY_SSL", "false").lower() == "true"
 
 # Pipeline tuning
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "30"))
-MAX_FETCH = int(os.getenv("MAX_FETCH", "500"))
+MAX_FETCH = int(os.getenv("MAX_FETCH", "100"))
 
 # Persist files
 LAST_TS_FILE = os.getenv("LAST_TS_FILE", "last_ts.txt")
@@ -96,7 +96,14 @@ def fetch_alerts_since(ts: str, size: int = 500):
     url = f"{base}:{OPENSEARCH_PORT}/wazuh-alerts-*/_search"
     query = {
         "size": size,
-        "query": {"range": {"@timestamp": {"gt": ts}}},
+        "query": {
+            "bool": {
+                "must": [
+                    {"range": {"@timestamp": {"gt": ts}}},
+                    {"term": {"agent.name": "DESKTOP-JP58I0C"}}
+                ]
+            }
+        },
         "sort": [{"@timestamp": {"order": "asc"}}]
     }
     resp = requests.get(url, auth=HTTPBasicAuth(OPENSEARCH_USER, OPENSEARCH_PASS), json=query, verify=OPENSEARCH_VERIFY, timeout=30)
@@ -326,20 +333,21 @@ Wazuh alert:
 
 # ========== Hybrid merge ==========
 def hybrid_merge(playbook_result: dict, ai_result: dict):
-    # extract classification from playbook
     playbook_cls = playbook_result.get("classification", "FP")
+    ai_cls = ai_result.get("classification", "FP")
 
-    # AI disabled → only rely on playbook
-    final_tp = (playbook_cls == "TP")
+    # OR condition: if either is TP → final TP
+    final_tp = (playbook_cls == "TP") or (ai_cls == "TP")
 
     return {
         "final_classification": "TP" if final_tp else "FP",
         "playbook": playbook_result,
         "ai": ai_result,
-        "category": playbook_result.get("category", "general"),
-        "reason": playbook_result.get("reason", "No reason provided"),
-        "recommended_action": playbook_result.get("reason", "Investigate")
+        "category": ai_result.get("category") or playbook_result.get("category", "general"),
+        "reason": f"Playbook: {playbook_result.get('reason')} | AI: {ai_result.get('short_reason')}",
+        "recommended_action": ai_result.get("recommended_action") or playbook_result.get("reason", "Investigate")
     }
+
  
 # ========== TheHive helpers (v5 API) ==========
 def build_thehive_payload(alert, ai_analysis, ioc_summary=None):
@@ -380,7 +388,7 @@ def build_thehive_payload(alert, ai_analysis, ioc_summary=None):
         "severity": severity,
         "type": "external",
         "source": "Wazuh-AI",
-        "tags": ["Wazuh", "AI", "TP"],
+        "tags": ["Wazuh", "AI", "Pipeline", "SmartSoc"],
         "raw": alert,
         "sourceRef": f"wazuh-{alert.get('@timestamp')}-{alert.get('rule',{}).get('id')}"
     }
@@ -455,7 +463,7 @@ def alert_streamer(poll_interval=POLL_INTERVAL_SECONDS, max_batch=MAX_FETCH):
                 ai_result = {"classification":"FP","short_reason":"Skipped AI"}
                 level = alert.get("rule", {}).get("level", 0)
                 call_ai = False
-                if playbook_result.get("classification") == "TP" or level >= 8:
+                if playbook_result.get("classification") == "TP" or level >= 3:
                     call_ai = True #Modified
                 if call_ai:
                     try:
