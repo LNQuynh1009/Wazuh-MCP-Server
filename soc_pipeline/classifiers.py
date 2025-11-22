@@ -1,0 +1,79 @@
+from .intel import virustotal_check_file_hash, virustotal_check_url_safe
+
+
+def classify_phishing(alert):
+    desc = (alert.get("rule", {}).get("description") or "").lower()
+    url = None
+    if alert.get("data"):
+        url = alert["data"].get("url") or alert["data"].get("uri")
+    verdict = "FP"
+    reason = "No malicious URL found"
+    if url:
+        vt = virustotal_check_url_safe(url)
+        if vt.get("verdict") == "MALICIOUS":
+            verdict = "TP"
+            reason = f"VirusTotal flagged URL {url}"
+    elif "phish" in desc or "email" in desc:
+        verdict = "TP"
+        reason = "Rule contains phishing/email keywords"
+    return {"category": "phishing", "classification": verdict, "reason": reason}
+
+
+def classify_malware(alert):
+    desc = (alert.get("rule", {}).get("description") or "").lower()
+    file_hash = None
+    if alert.get("data"):
+        file_hash = alert["data"].get("sha256") or alert["data"].get("md5") or alert["data"].get("sha1")
+    verdict = "FP"
+    reason = "No malicious file found"
+    if file_hash:
+        vt = virustotal_check_file_hash(file_hash)
+        if vt.get("verdict") == "MALICIOUS":
+            verdict = "TP"
+            reason = f"VirusTotal flagged hash {file_hash}"
+    elif any(k in desc for k in ("malware", "trojan", "ransom", "virus")):
+        verdict = "TP"
+        reason = "Rule description indicates malware"
+    return {"category": "malware", "classification": verdict, "reason": reason}
+
+
+def classify_ip_connection(alert):
+    src_ip = alert.get("srcip") or alert.get("src_ip") or (alert.get("data") or {}).get("srcip")
+    verdict = "FP"
+    reason = "No malicious IP reported"
+    if src_ip:
+        verdict = "TP"
+        reason = f"Connection to {src_ip}"
+    return {"category": "ip_connection", "classification": verdict, "reason": reason}
+
+
+def classify_web_attack(alert):
+    desc = (alert.get("rule", {}).get("description") or "").lower()
+    verdict = "FP"
+    reason = "No web exploit indicators"
+    keywords = ["xss", "sql injection", "rce", "directory traversal", "webshell", "lfi", "sqli"]
+    found = [k for k in keywords if k in desc]
+    if found:
+        verdict = "TP"
+        reason = f"Web attack keywords found: {', '.join(found)}"
+    return {"category": "web_attack", "classification": verdict, "reason": reason}
+
+
+def classify_bruteforce(alert):
+    desc = (alert.get("rule", {}).get("description") or "").lower()
+    verdict = "FP"
+    reason = "No brute-force pattern"
+    if "brute" in desc or "failed password" in desc or "authentication failure" in desc or "login failed" in desc:
+        verdict = "TP"
+        reason = "Detected repeated auth failures / brute-force pattern"
+    return {"category": "bruteforce", "classification": verdict, "reason": reason}
+
+
+def classify_login_anomaly(alert):
+    desc = (alert.get("rule", {}).get("description") or "").lower()
+    verdict = "FP"
+    reason = "Normal login"
+    if "login" in desc and ("unusual" in desc or "from unknown" in desc or "geolocation" in desc):
+        verdict = "TP"
+        reason = "Login from abnormal location/time"
+    return {"category": "login_anomaly", "classification": verdict, "reason": reason}

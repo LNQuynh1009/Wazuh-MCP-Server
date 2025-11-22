@@ -1,4 +1,34 @@
 # Wazuh-MCP-Server
+
+## Modular Structure (refactor)
+
+The pipeline has been refactored into a Python package for clarity and reuse:
+
+- `soc-pipeline.py`: Thin entrypoint that starts the pipeline
+- `soc_pipeline/` package:
+  - `config.py`: environment configuration and constants
+  - `state.py`: persistent timestamp and IOC cache helpers
+  - `opensearch.py`: OpenSearch alert queries
+  - `intel.py`: VirusTotal/AbuseIPDB lookups and IOC extraction
+  - `classifiers.py`: rule-based/playbook classifiers
+  - `ai.py`: Claude (Anthropic) classification
+  - `thehive.py`: TheHive payload + API client
+  - `pipeline.py`: orchestrator loop
+
+### Setup
+
+```powershell
+python -m venv .venv; .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+### Run
+
+```powershell
+python soc-pipeline.py
+```
+
+Ensure `.env` is configured as shown below. The pipeline resumes from `last_ts.txt` and updates `ioc_cache.json` automatically.
 The server.py is to run a mcp server to connect to wazuh.
 The features are still being developed.
 To use it please config your claude_desktop_config.json.

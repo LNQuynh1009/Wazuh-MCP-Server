@@ -1,0 +1,27 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+
+# Project State & Cache
+ioc_cache.json
+last_ts.txt
+
+# Logs & Reports
+*.log
+*.xlsx
+true_positive_alerts_*.xlsx
+
+# OS
+.DS_Store
+Thumbs.db
