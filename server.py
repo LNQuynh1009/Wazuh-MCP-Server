@@ -302,82 +302,122 @@ def virustotal_check_url(url: str):
 
 # ========== NEW: BULK IOC CHECKER ==========
 
-# @mcp.tool()
-# def check_alert_iocs(alert_json: str):
-#     """Extract and check all IOCs (IPs, domains, hashes) from Wazuh alert data.
-    
-#     Args:
-#         alert_json: JSON string of alert data from search_alerts
-    
-#     Returns:
-#         Dict with checked IPs, domains, and hashes with their threat intel results
-#     """
-#     try:
-#         # Parse alert data
-#         if isinstance(alert_json, str):
-#             alert_data = json.loads(alert_json)
-#         else:
-#             alert_data = alert_json
-        
-#         results = {
-#             "summary": {
-#                 "total_ips_found": 0,
-#                 "public_ips_checked": 0,
-#                 "malicious_ips": 0,
-#                 "suspicious_ips": 0
-#             },
-#             "ips_checked": []
-#         }
-        
-#         # Convert alert data to string for regex extraction
-#         alert_str = json.dumps(alert_data)
-        
-#         # Extract IPs using regex
-#         ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
-#         ips = set(re.findall(ip_pattern, alert_str))
-#         results["summary"]["total_ips_found"] = len(ips)
-        
-#         # Filter out private IPs
-#         private_ip_patterns = [
-#             r'^10\.',
-#             r'^172\.(1[6-9]|2[0-9]|3[01])\.',
-#             r'^192\.168\.',
-#             r'^127\.',
-#             r'^0\.',
-#             r'^169\.254\.',
-#             r'^255\.'
-#         ]
-        
-#         public_ips = []
-#         for ip in ips:
-#             is_private = any(re.match(pattern, ip) for pattern in private_ip_patterns)
-#             if not is_private and ip != "0.0.0.0":
-#                 public_ips.append(ip)
-        
-#         # Check public IPs (limit to 5 to avoid rate limits)
-#         for ip in list(public_ips)[:5]:
-#             vt_result = virustotal_check_ip(ip)
-#             abuse_result = abuseipdb_check_ip(ip)
-            
-#             combined_verdict = "CLEAN"
-#             if vt_result.get("verdict") == "MALICIOUS" or abuse_result.get("verdict") == "MALICIOUS":
-#                 combined_verdict = "MALICIOUS"
-#                 results["summary"]["malicious_ips"] += 1
-#             elif vt_result.get("verdict") == "SUSPICIOUS" or abuse_result.get("verdict") == "SUSPICIOUS":
-#                 combined_verdict = "SUSPICIOUS"
-#                 results["summary"]["suspicious_ips"] += 1
-            
-#             results["ips_checked"].append({
-#                 "ip": ip,
-#                 "verdict": combined_verdict,
-#                 "virustotal": vt_result,
-#                 "abuseipdb": abuse_result
-#             })
-#             results["summary"]["public_ips_checked"] += 1
-        
-#         return results
-#     except Exception as e:
-#         return {"error": str(e)}
+@mcp.tool()
+def check_alert_iocs(alert_json: str):
+    """
+    Extract and check all IOCs (IPs, domains, hashes) from Wazuh alert data
+    using internal playbook functions:
+    - evaluate_domain_playbook(domain)
+    - check_file_playbook(file_hash, path)
+    - evaluate_ip_threat(ip)
+
+    Args:
+        alert_json: JSON string of alert data from search_alerts
+
+    Returns:
+        Dict with checked IOCs: IPs, domains, hashes
+    """
+    try:
+        # --- Parse alert JSON ---
+        if isinstance(alert_json, str):
+            alert_data = json.loads(alert_json)
+        else:
+            alert_data = alert_json
+
+        alert_str = json.dumps(alert_data)
+
+        results = {
+            "summary": {
+                "total_ips_found": 0,
+                "total_domains_found": 0,
+                "total_hashes_found": 0,
+                "ips_checked": 0,
+                "domains_checked": 0,
+                "hashes_checked": 0
+            },
+            "ips": [],
+            "domains": [],
+            "hashes": []
+        }
+
+        # =============================
+        # 1. Extract IP ADDRESSES
+        # =============================
+        ip_pattern = r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+        ips = set(re.findall(ip_pattern, alert_str))
+        results["summary"]["total_ips_found"] = len(ips)
+
+        # Exclude private IP ranges
+        private_ip_patterns = [
+            r'^10\.',
+            r'^172\.(1[6-9]|2[0-9]|3[01])\.',
+            r'^192\.168\.',
+            r'^127\.',
+            r'^169\.254\.',
+            r'^0\.',
+            r'^255\.'
+        ]
+
+        public_ips = [
+            ip for ip in ips
+            if not any(re.match(p, ip) for p in private_ip_patterns)
+            and ip != "0.0.0.0"
+        ]
+
+        for ip in public_ips:
+            ip_result = evaluate_ip_threat(ip)
+
+            results["ips"].append({
+                "ip": ip,
+                "result": ip_result
+            })
+
+            results["summary"]["ips_checked"] += 1
+
+        # =============================
+        # 2. Extract DOMAIN NAMES
+        # =============================
+        domain_pattern = r"\b([a-zA-Z0-9-]+\.[a-zA-Z]{2,})\b"
+        domains = set(re.findall(domain_pattern, alert_str))
+        results["summary"]["total_domains_found"] = len(domains)
+
+        for domain in list(domains):
+            dom_result = evaluate_domain_playbook(domain)
+
+            results["domains"].append({
+                "domain": domain,
+                "result": dom_result
+            })
+
+            results["summary"]["domains_checked"] += 1
+
+        # =============================
+        # 3. Extract FILE HASHES
+        # =============================
+        md5_pattern = r"\b[a-fA-F0-9]{32}\b"
+        sha1_pattern = r"\b[a-fA-F0-9]{40}\b"
+        sha256_pattern = r"\b[a-fA-F0-9]{64}\b"
+
+        hashes = set(re.findall(md5_pattern, alert_str)
+                     + re.findall(sha1_pattern, alert_str)
+                     + re.findall(sha256_pattern, alert_str))
+
+        results["summary"]["total_hashes_found"] = len(hashes)
+
+        for file_hash in hashes:
+            file_result = check_file_playbook(file_hash, path="")
+
+            results["hashes"].append({
+                "hash": file_hash,
+                "result": file_result
+            })
+
+            results["summary"]["hashes_checked"] += 1
+
+        return results
+
+    except Exception as e:
+        return {"error": str(e)}
     
 #Lấy thông tin về hardware, processes, os, package, network treena agent
 # === Hàm gọi API Wazuh ===
