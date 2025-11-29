@@ -434,28 +434,26 @@ def wazuh_get(path, params=None):
 @mcp.tool()
 def get_agent_syscollector(agent_id):
     """
-    Lấy toàn bộ thông tin hệ thống của một agent thông qua API syscollector của Wazuh.
+    Retrieve all system information of an agent through Wazuh's Syscollector API.
 
-    Thông tin được thu thập bao gồm:
-      - os: Thông tin hệ điều hành (Windows, Linux,...)
-      - netiface: Thông tin các card mạng (network interfaces)
-      - netport: Các cổng mạng đang mở trên agent
-      - netproto: Các giao thức mạng đang sử dụng
-      - packages: Các gói phần mềm đã cài đặt
-      - processes: Các tiến trình đang chạy
-      - ports: Các cổng liên quan (mở/tồn tại)
-      - hardware: Thông tin phần cứng của agent
-      - hotfixes: Các bản vá bảo mật đã cài đặt trên hệ thống
+    The collected information includes:
 
-    Tham số:
-        agent_id (str): ID của agent cần lấy thông tin.
+    - os: Operating system information (Windows, Linux, etc.)
+    - netiface: Network interface information      
+    - netport: Open network ports on the agent
+    - netproto: Network protocols in use
+    - packages: Installed software packages
+    - processes: Running processes
+    - ports: Related/existing ports
+    - hardware: Hardware information of the agent
+    - hotfixes: Security patches installed on the system
 
-    Trả về:
-        dict: Kết quả dưới dạng dictionary gồm agent_id và dữ liệu syscollector của từng module.
-              Nếu có lỗi khi gọi API từng module, trả về lỗi và mã trạng thái HTTP tương ứng.
+    Parameters:
+    agent_id (str): The ID of the agent to retrieve information from.
 
-    Ví dụ:
-        get_agent_syscollector("001")
+    Returns:
+    dict: A dictionary containing the agent_id and syscollector data of each module.
+    If any module API call fails, the response will include the error and the corresponding HTTP status code.
 
     """
     modules = [
@@ -770,20 +768,20 @@ def find_technique(tech_id: str):
 @mcp.tool()
 def check_file_vt_info(file_hash):
     """
-    Kiểm tra hash file trên VirusTotal và chuẩn hóa dữ liệu đầu ra
-    để các tiêu chí khác có thể sử dụng.
+    Check a file hash on VirusTotal and normalize the output
+    so that it can be used by other evaluation criteria.
 
     Args:
-        file_hash: Hash file
+    file_hash: The file hash to check
 
     Returns:
-        Dict gồm:
-            - crit1: trạng thái kiểm tra VT
-            - name: tên file gợi ý
-            - malicious: số phát hiện độc hại
-            - suspicious: số phát hiện đáng ngờ
-            - threat: nhãn mối đe dọa phổ biến
-            - vt_raw: dữ liệu thô từ VT
+        A dictionary containing:
+        - crit1: VirusTotal evaluation status
+        - name: Suggested file name
+        - malicious: Number of malicious detections
+        - suspicious: Number of suspicious detections   
+        - threat: Common threat label
+        - vt_raw: Raw data returned from VirusTotal
     """
     vt = virustotal_check_file_hash(file_hash)
 
@@ -808,14 +806,14 @@ def check_file_vt_info(file_hash):
 @mcp.tool()
 def check_file_path(path):
     """
-    Kiểm tra đường dẫn file xem có nằm trong thư mục nhạy cảm
-    và có phần mở rộng thực thi nguy hiểm hay không.
+    Check whether a file path is located inside a sensitive directory
+    and whether it has a dangerous executable extension.
 
     Args:
-        path: đường dẫn file
+        path: The file path
 
     Returns:
-        Dict với crit2: "OK" hoặc cảnh báo file thực thi trong thư mục nhạy cảm
+        A dictionary containing crit2: "OK" or a warning indicating that an executable file is located in a sensitive directory.
     """
     path_lc = path.lower()
 
@@ -837,13 +835,14 @@ def check_file_path(path):
 @mcp.tool()
 def check_filename_reputation(name):
     """
-    Kiểm tra tên file xem có chứa từ khóa nguy hiểm, crack, malware, trojan,...
+    Check whether the file name contains dangerous keywords such as
+    crack, malware, trojan, etc.
 
     Args:
-        name: tên file
+    name: The file name
 
     Returns:
-        Dict với crit3: "OK" hoặc cảnh báo tên file đáng ngờ
+    A dictionary containing crit3: "OK" or a warning indicating a suspicious file name.
     """
     if not name:
         return {"crit3": "Không có tên file từ VT"}
@@ -860,21 +859,20 @@ def check_filename_reputation(name):
 @mcp.tool()
 def get_user_from_wazuh_logs(filename: str):
     """
-    Truy vấn Wazuh OpenSearch logs để tìm user tạo file.
-
-    Hỗ trợ:
-        - Windows Sysmon/EventLog
-        - Linux Auditd (tên user hoặc AUID)
+    Query Wazuh OpenSearch logs to identify the user who created the file.
+    Supported sources:
+        Windows Sysmon/EventLog
+        Linux Auditd (username or AUID)
 
     Args:
-        filename: tên file
+        filename: The file name
 
     Returns:
-        Dict chứa:
-            - type: "windows" hoặc "linux"
-            - user: tên user hoặc UID
-            - status: trạng thái tìm kiếm
-            - raw: log thô từ Wazuh
+    A dictionary containing:
+        type: "windows" or "linux"
+        user: The username or UID
+        status: Search status
+        raw: Raw logs returned from Wazuh
     """
 
     query = f"*{filename}*"
@@ -975,15 +973,17 @@ def get_user_from_wazuh_logs(filename: str):
 @mcp.tool()
 def check_file_creator_user(filename):
     """
-    Xác định user tạo file từ Wazuh logs, đồng thời cảnh báo
-    nếu file do user dịch vụ (nguy cơ exploit) tạo.
+    Identify the user who created the file from Wazuh logs, and issue a warning
+    if the file was created by a service account (potential exploit risk).
 
     Args:
-        filename: tên file
+        filename: The file name
 
     Returns:
-        Dict với crit4: thông tin user tạo file hoặc cảnh báo
+        A dictionary containing crit4: information about the user who created the file,
+        or a warning.
     """
+
     user_info = get_user_from_wazuh_logs(filename)
 
     user = user_info.get("user")
@@ -1002,14 +1002,15 @@ def check_file_creator_user(filename):
 @mcp.tool()
 def summarize_playbook(results):
     """
-    Tổng hợp kết quả các tiêu chí kiểm tra file và đưa ra kết luận cuối.
+    Aggregate the results of all file-checking criteria and produce the final conclusion.
 
     Args:
-        results: dict chứa kết quả crit1 -> crit4
+        results: A dictionary containing the outputs of crit1 → crit4
 
     Returns:
-        Chuỗi kết luận (ví dụ: "CHẮC CHẮN LÀ MÃ ĐỘC", "NGHI NGỜ MẠNH", ...)
+        A conclusion string (e.g., "CONFIRMED MALWARE", "HIGHLY SUSPICIOUS", ...)
     """
+
     malicious = results["crit1"].get("malicious", 0)
 
     # Quy tắc đánh giá cuối
@@ -1033,20 +1034,22 @@ def summarize_playbook(results):
 @mcp.tool()
 def check_file_playbook(file_hash, path):
     """
-    Thực hiện toàn bộ playbook kiểm tra file:
-        1. VirusTotal
-        2. Đường dẫn file nhạy cảm
-        3. Tên file đáng ngờ
-        4. User tạo file
-        5. Tổng hợp kết luận
+    Execute the complete file analysis playbook:
+        1. VirusTotal scan
+        2. Sensitive file path check
+        3. Suspicious file name check
+        4. File creator user check
+        5. Final conclusion aggregation
 
     Args:
-        file_hash: hash file cần kiểm tra
-        path: đường dẫn file trên máy
+        file_hash: The hash of the file to be analyzed
+        path: The file path on the system
 
     Returns:
-        Dict kết quả tổng hợp bao gồm crit1->crit4 và conclusion
+        A dictionary containing the aggregated results, including crit1 → crit4
+        and the final conclusion.
     """
+
     result = {}
 
     # tiêu chí 1
@@ -1078,12 +1081,13 @@ def check_file_playbook(file_hash, path):
 @mcp.tool()
 def evaluate_domain_playbook(domain: str):
     """
-    Đánh giá độ nguy hiểm của một domain dựa trên các tiêu chí:
+    Assess the risk level of a domain based on the following criteria:
     1. VirusTotal
     2. Domain name pattern
     3. Google presence (basic heuristic)
     4. HTTP access test
     """
+
     # print(f"\n=== RESULT FOR DOMAIN: {domain} ===")
 
     # Normalize domain
@@ -1216,10 +1220,13 @@ def check_ip_vpn(ip: str):
 @mcp.tool()
 def evaluate_ip_threat(ip: str):
     """
-    Đánh giá IP theo playbook, chỉ trả về kết quả các tiêu chí (không chứa raw data).
+    Evaluate an IP according to the playbook, returning only the results of the criteria 
+    (without including raw data).
+
     Args:
-        ip: Địa chỉ IP cần đánh giá
+        ip: The IP address to be evaluated
     """
+
 
     result = {
         "ip": ip,
