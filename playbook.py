@@ -1863,6 +1863,259 @@ def process_malicious_playbook(commandline=None, path=None, hash=None, parent_co
     return result
 
 #print(check_file_playbook("6d7f542ed46fcb02893a8672eb405d4b543e2a92db1ac22b5d53dbf303568b25", "C:/Users/admin/Downloads/mas_17-20230810T055912Z-001/mas_17-20230810T055912Z-001/mas_17/MAS_1.7_Password_1234/MAS_1.7/All-In-One-Version/MAS_AIO.cmd"))
+from collections import defaultdict
+@mcp.tool()
+def evaluate_login_ips(user: str, logon_type, ip_source) -> dict:
+    """
+    Đánh giá alert liên quan đến việc user đăng nhập bất thường từ 1 ip
+    - Gom nhóm 500 event gần nhất của user.
+    - Kiểm tra IP xem nó có phải là vpn, độc, private
+    - Tính tần suất login từ các ip khác nhau của user 
+    Từ đó xác định TP/FP
+    Args:
+        user: tên user cần kiểm tra
+    
+    Returns:
+        dict: kết quả đánh giá
+    """
+    result = {
+        "user": user,
+        "ip_source": ip_source,  # dict mỗi IP và thông tin đánh giá
+        "check_ip": [],
+        "verdict": "UNKNOWN",
+        "frequency": "UNKNOWN",
+        "reason": [],
+        "tag": ""
+    }
+    if logon_type == "2" or logon_type == "5":
+        result["verdict"] = "CLEAN"
+        result["reason"] = "Đăng nhập local từ đăng nhập tương tác hoặc từ account hệ thông tự đăng nhập"
+        result["tag"] = "FP"
+        return result
+    # Lấy 500 sự kiện login gần nhất của user
+    query = f"*{user}*"
+    events = search_alerts(query, size=500)
+
+    if not events:
+        result["verdict"] = "NO_EVENTS"
+        result["reason"].append("Không tìm thấy sự kiện đăng nhập nào từ user.")
+        return result
+
+    #Windows
+    ip_summary = {}
+
+    for ev in events:
+        ev_data = ev.get("data", {}).get("win", {}).get("eventdata", {})
+        ip = ev_data.get("ipAddress")
+        if not ip:
+            continue
+
+        if ip not in ip_summary:
+            ip_summary[ip] = {
+                "count": 0,
+                "check_ip_source": "",
+                "reason": []
+            }
+
+        ip_summary[ip]["count"] += 1
+
+        if ip.startswith(("10.", "172.", "192.168")):
+            ip_summary[ip]["check_ip_source"] = "private"
+            ip_summary[ip]["reason"].append("IP nội bộ")
+        else:
+            ip_info = evaluate_ip_threat_second(ip)
+            ip_summary[ip]["check_ip_source"] = ip_info.get("verdict", "UNKNOWN")
+            ip_summary[ip]["reason"].extend(ip_info.get("reason", []))
+
+    result["check_ip"] = ip_summary
+
+    # Tổng hợp verdict
+    suspicious_ips = [ip for ip, info in ip_summary.items() if info["check_ip_source"] in ["MALICIOUS", "SUSPICIOUS"]]
+    if len(ip_summary) >= 10 and len(suspicious_ips) == 0:
+        result["verdict"] = "CLEAN"
+        result["reason"].append("Tài khoản dùng chung, nghiệp vụ (account thường xuyên được đăng nhập trên các thiết bị khác nhau)")
+    elif len(suspicious_ips) >= 1:
+        result["verdict"] = "POTENTIAL_ATTACK"
+        result["reason"].append(f"IP đăng nhập đáng ngờ: {suspicious_ips}")
+    else:
+        result["verdict"] = "CLEAN"
+        result["reason"].append("Tất cả IP đăng nhập được đánh giá an toàn.")
+        
+    if result["verdict"] == "CLEAN":
+        result["tag"] = "FP"
+    else:
+        result["tag"] = "TP"
+    return result
+
+
+from datetime import datetime, timedelta
+from collections import Counter
+
+@mcp.tool()
+def eveluate_analyze_bruteforce(user: str, target_host: str, protocol: str, ip_attack: str = None) -> dict:
+    """
+    Đánh giá alert liên quan đến brute-force user cho cả Windows và Linux.
+    Các bước:
+    1. Lấy log fail/success từ search_alerts
+    2. Xác định IP tấn công, tần suất 5 phút
+    3. Kiểm tra brute-force thành công (fail nhiều → success đột ngột)
+    4. Kiểm tra FP: password expired, vừa đổi mật khẩu
+    5. Đánh giá nghiệp vụ (IP này login user này thường xuyên)
+    """
+
+    result = {
+        "attacker_ip": "",
+        "check_ip_attack": "",
+        "target_host": target_host,
+        "user": user,
+
+        "bruteforce_window": {"start": None, "end": None},
+        "event_count": 0,
+
+        "successful_logins_on_target": [],
+        "successful_logins_by_ip": {},
+
+        "user_password_last_change": None,
+        "password_expired": False,
+
+        "verdict": "UNKNOWN",
+        "reason": []
+    }
+
+    # =====================================================
+    # BƯỚC 0 – CHECK MỨC ĐỘ ĐỘC HẠI CỦA IP
+    # =====================================================
+    ip_is_malicious = False
+    check_ip = None
+
+    if ip_attack:
+        check_ip = evaluate_ip_threat_second(ip_attack)
+        result["check_ip_attack"] = check_ip
+
+        if check_ip.get("verdict") != "CLEAN" and \
+           "Không đủ bằng chứng" not in check_ip.get("reason", ""):
+            ip_is_malicious = True
+            result["reason"].append("IP tấn công bị đánh giá là độc (threat intelligence).")
+
+    # =====================================================
+    # BƯỚC 1 – LẤY LOG FAIL / SUCCESS
+    # =====================================================
+    base_q = f"*{user}* AND *{target_host}* AND *{protocol}*"
+
+    q_fail = base_q + " AND ( *4625* OR *Failed password* OR *authentication failure* )"
+    q_success = base_q + " AND ( *4624* OR *Accepted password* )"
+
+    fail_events = search_alerts(q_fail, size=500)
+    success_events = search_alerts(q_success, size=500)
+
+    if not fail_events:
+        result["verdict"] = "NO_DATA"
+        result["reason"].append("Không có log đăng nhập thất bại.")
+        return result
+
+    result["event_count"] = len(fail_events)
+
+    # =====================================================
+    # BƯỚC 2 – XÁC ĐỊNH IP TẤN CÔNG + TẦN SUẤT
+    # =====================================================
+    attacker_ips = []
+
+    for e in fail_events:
+        # Windows
+        ip = e["data"].get("win", {}).get("eventdata", {}).get("ipAddress")
+        # Linux
+        if not ip:
+            ip = e["data"].get("srcip")
+        if ip:
+            attacker_ips.append(ip)
+
+    attacker_ip = ip_attack if ip_attack else (Counter(attacker_ips).most_common(1)[0][0] if attacker_ips else "")
+    result["attacker_ip"] = attacker_ip
+
+    # Xác định khoảng thời gian brute-force
+    times = sorted([datetime.fromisoformat(ev["timestamp"].replace("Z", "+00:00")) for ev in fail_events])
+    start = times[0]
+    end = times[-1]
+
+    result["bruteforce_window"]["start"] = str(start)
+    result["bruteforce_window"]["end"] = str(end)
+
+    duration_seconds = (end - start).total_seconds()
+
+    # =====================================================
+    # BƯỚC 2.5 – **NEW**: IP ĐỘC + TẦN SUẤT > NGƯỠNG → TRUE POSITIVE
+    # =====================================================
+    if ip_is_malicious:
+        if result["event_count"] >= 20 and duration_seconds <= 300:  # 20 lần / 5 phút
+            result["verdict"] = "TRUE_POSITIVE"
+            result["reason"].append("IP độc + tần suất tấn công cao → brute-force thực sự.")
+            return result
+
+    # =====================================================
+    # BƯỚC 3 – SUCCESS LOGINS TRÊN MÁY ĐÍCH
+    # =====================================================
+    for ev in success_events:
+        ip = (
+            ev["data"].get("win", {}).get("eventdata", {}).get("IpAddress")
+            or ev["data"].get("srcip")
+        )
+        result["successful_logins_on_target"].append({"ip": ip, "time": ev["timestamp"]})
+
+    q_recent_success = f"*4624* AND *{user}* AND *{attacker_ip}*"
+    recent_success = search_alerts(q_recent_success, size=500)
+    result["successful_logins_by_ip"][attacker_ip] = len(recent_success)
+
+    # =====================================================
+    # BƯỚC 4 – PASSWORD EXPIRED / PASSWORD CHANGE
+    # =====================================================
+    q_expired = f"*4625* AND *{user}* AND *0xC0000071*"
+    expired_events = search_alerts(q_expired, size=500)
+    if expired_events:
+        result["password_expired"] = True
+        result["verdict"] = "FALSE_POSITIVE"
+        result["reason"].append("Password expired → False Positive.")
+        return result
+
+    q_changed = f"*{user}* AND ( *4723* OR *4724* )"
+    changed_events = search_alerts(q_changed, size=500)
+
+    if changed_events:
+        last_change = max([datetime.fromisoformat(ev["timestamp"].replace("Z", "+00:00")) for ev in changed_events])
+        result["user_password_last_change"] = str(last_change)
+
+        if abs((start - last_change).total_seconds()) <= 300:
+            result["verdict"] = "FALSE_POSITIVE"
+            result["reason"].append("User vừa đổi mật khẩu → cache mật khẩu cũ gây fail.")
+            return result
+
+    # =====================================================
+    # BƯỚC 5 – SUCCESS ĐỘT NGỘT SAU FAIL NHIỀU
+    # =====================================================
+    if result["successful_logins_on_target"]:
+        result["verdict"] = "TRUE_POSITIVE"
+        result["reason"].append("Sau nhiều lần fail có login thành công → nghi brute-force thành công.")
+        return result
+
+    # =====================================================
+    # BƯỚC 6 – KIỂM TRA NGHIỆP VỤ
+    # =====================================================
+    if result["successful_logins_by_ip"][attacker_ip] >= 3:
+        result["verdict"] = "LIKELY_LEGIT"
+        result["reason"].append("IP này thường xuyên login user này trước đó (nghiệp vụ).")
+        return result
+
+    # =====================================================
+    # BƯỚC 7 – ESCALATE / MONITOR
+    # =====================================================
+    if result["event_count"] < 20:
+        result["verdict"] = "MONITOR"
+        result["reason"].append("Tần suất thấp → theo dõi thêm.")
+        return result
+
+    result["verdict"] = "ESCALATE"
+    result["reason"].append("Bruteforce mạnh, không thuộc FP.")
+    return result
+
 
 if __name__ == "__main__":
     print(f"Starting Wazuh MCP server on {BASE_URL}...")
