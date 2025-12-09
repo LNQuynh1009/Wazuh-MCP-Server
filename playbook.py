@@ -17,7 +17,7 @@ import datetime
 from urllib.parse import urlparse
 
 # ============================================
-# CÂU HÌNH CHUNG
+# CONFIG GENERAL
 # ============================================
 load_dotenv()
 WAZUH_HOST = os.getenv("WAZUH_HOST")
@@ -45,7 +45,7 @@ def get_wazuh_token():
     return resp.json()["data"]["token"]
 
 # ============================================
-# CÁC HÀM KIỂM TRA IP
+# CHECK IP 
 # ============================================
 
 def virustotal_check_ip(ip: str):
@@ -161,7 +161,9 @@ def check_ip_vpn(ip) -> dict:
 
 @mcp.tool() #Tool đơn
 def evaluate_ip_threat(ip: str) -> dict:
-    """Đánh giá IP theo playbook, chỉ trả về kết quả các tiêu chí (không chứa raw data)."""
+    """
+    Evalaute ip follow playbook, returning only the results of the criteria (without including raw data).
+    """
 
     result = {
         "ip": ip,
@@ -319,7 +321,9 @@ def evaluate_ip_threat(ip: str) -> dict:
     return result
 
 def evaluate_ip_threat_second(ip: str) -> dict:
-    """Đánh giá IP theo playbook, chỉ trả về kết quả các tiêu chí (không chứa raw data)."""
+    """
+    Evaluate the IP according to the playbook, returning only the results of the criteria (without including raw data).
+    """
 
     result = {
         "ip": ip,
@@ -530,10 +534,10 @@ def virustotal_check_domain(domain: str):
     except Exception as e:
         return {"error": str(e)}
 
-@mcp.tool() #Tool đơn
+@mcp.tool() #Tool Single
 def evaluate_domain_playbook(domain: str) -> dict:
     """
-    Assess the risk level of a domain based on the following criteria:
+    Evaluate domain (follow playbook), based on the following criteria
     1. VirusTotal
     2. Domain name pattern
     3. Google presence (basic heuristic)
@@ -647,7 +651,7 @@ def evaluate_domain_playbook(domain: str) -> dict:
 
 def evaluate_domain_playbook_second(domain: str) -> dict:
     """
-    Assess the risk level of a domain based on the following criteria:
+    Evaluate domain (follow playbook), based on the following criteria
     1. VirusTotal
     2. Domain name pattern
     3. Google presence (basic heuristic)
@@ -795,20 +799,21 @@ def virustotal_check_file_hash(file_hash: str):
 
 def check_file_vt_info(file_hash):
     """
-    Kiểm tra hash file trên VirusTotal và chuẩn hóa dữ liệu đầu ra
-    để các tiêu chí khác có thể sử dụng.
+    Check the file hash on VirusTotal and normalize the output data
+    so that other criteria can use it.
 
     Args:
-        file_hash: Hash file
+        file_hash: File hash
 
     Returns:
-        Dict gồm:
-            - crit1: trạng thái kiểm tra VT
-            - name: tên file gợi ý
-            - malicious: số phát hiện độc hại
-            - suspicious: số phát hiện đáng ngờ
-            - threat: nhãn mối đe dọa phổ biến
-            - vt_raw: dữ liệu thô từ VT
+        A dictionary containing:
+            - crit1: VirusTotal check status
+            - name: Suggested file name
+            - malicious: Number of malicious detections
+            - suspicious: Number of suspicious detections
+            - threat: Common threat label
+            - vt_raw: Raw data from VirusTotal
+
     """
     vt = virustotal_check_file_hash(file_hash)
 
@@ -833,13 +838,15 @@ def check_file_vt_info(file_hash):
 
 def check_filename_reputation(name):
     """
-    Kiểm tra tên file xem có chứa từ khóa nguy hiểm, crack, malware, trojan,...
+    Check the file name to see if it contains dangerous keywords such as
+    crack, malware, trojan, etc.
 
     Args:
-        name: tên file
+        name: file name
 
     Returns:
-        Dict với crit3: "OK" hoặc cảnh báo tên file đáng ngờ
+        A dictionary with crit3: "OK" or a warning that the file name is suspicious
+
     """
     if not name:
         return {"crit3": "Không có tên file từ VT"}
@@ -856,21 +863,22 @@ def check_filename_reputation(name):
 
 def get_user_from_wazuh_logs(filename: str):
     """
-    Truy vấn Wazuh OpenSearch logs để tìm user tạo file.
+    Query Wazuh OpenSearch logs to find the user who created the file.
 
-    Hỗ trợ:
+    Supports:
         - Windows Sysmon/EventLog
-        - Linux Auditd (tên user hoặc AUID)
+        - Linux Auditd (username or AUID)
 
     Args:
-        filename: tên file
+        filename: file name
 
     Returns:
-        Dict chứa:
-            - type: "windows" hoặc "linux"
-            - user: tên user hoặc UID
-            - status: trạng thái tìm kiếm
-            - raw: log thô từ Wazuh
+        A dictionary containing:
+            - type: "windows" or "linux"
+            - user: username or UID
+            - status: search status
+            - raw: raw logs from Wazuh
+
     """
 
     query = f"*{filename}*"
@@ -971,14 +979,15 @@ def get_user_from_wazuh_logs(filename: str):
 
 def check_file_creator_user(filename):
     """
-    Xác định user tạo file từ Wazuh logs, đồng thời cảnh báo
-    nếu file do user dịch vụ (nguy cơ exploit) tạo.
+    Determine the user who created the file from Wazuh logs, and also issue a warning
+    if the file was created by a service account (potential exploit risk).
 
     Args:
-        filename: tên file
+        filename: file name
 
     Returns:
-        Dict với crit4: thông tin user tạo file hoặc cảnh báo
+        A dictionary with crit4: information about the user who created the file or a warning
+
     """
     check = "OK"
     user_info = get_user_from_wazuh_logs(filename)
@@ -1015,7 +1024,7 @@ def check_file_creator_user(filename):
 
 def summarize_playbook(results):
     """
-    Tổng hợp kết quả các tiêu chí kiểm tra file và đưa ra kết luận cuối.
+    Aggregate the results of all file inspection criteria and produce the final conclusion.
     """
     malicious = results["crit1"].get("malicious", 0)
 
@@ -1053,19 +1062,20 @@ def summarize_playbook(results):
 @mcp.tool() #Tool đơn
 def check_file_playbook(file_hash, path) -> dict:
     """
-    Thực hiện toàn bộ playbook kiểm tra file:
+    Execute the entire file inspection playbook:
         1. VirusTotal
-        2. Đường dẫn file nhạy cảm
-        3. Tên file đáng ngờ
-        4. User tạo file
-        5. Tổng hợp kết luận
+        2. Sensitive file path check
+        3. Suspicious file name
+        4. User who created the file
+        5. Final aggregated conclusion
 
     Args:
-        file_hash: hash file cần kiểm tra
-        path: đường dẫn file trên máy
+        file_hash: hash of the file to be inspected
+        path: file path on the system
 
     Returns:
-        Dict kết quả tổng hợp bao gồm crit1->crit4 và conclusion
+        A dictionary containing the aggregated results including crit1→crit4 and the final conclusion
+
     """
     result = {}
 
@@ -1105,15 +1115,16 @@ def check_file_playbook(file_hash, path) -> dict:
 # ============================================
 def is_suspicious_executable(path) -> dict:
     """
-    Kiểm tra đường dẫn file xem có nằm trong thư mục nhạy cảm
-    và có phần mở rộng thực thi nguy hiểm hay không,
-    nhưng loại trừ các file nằm trong whitelist.
+    Check whether the file path is located in a sensitive directory
+    and has a dangerous executable extension,
+    while excluding files that are in the whitelist.
 
     Args:
-        path: đường dẫn file
+        path: file path
 
     Returns:
-        True nếu file đáng ngờ, False nếu an toàn
+        True if the file is suspicious, False if it is safe
+
     """
     path_lc = path.lower().replace("\\\\", "/")
 
@@ -1339,8 +1350,7 @@ def get_agent_syscollector(agent_id):
 @mcp.tool() #Tool ghép 
 def evaluate_ip_connection_playbook(ip: str, agent_id: str = None) -> dict:
     """
-    Đánh giá kết nối đến IP độc theo playbook.
-
+    Evaluate the connection to a malicious IP according to the playbook.
     """
 
     result = {
@@ -1647,7 +1657,10 @@ def evaluate_ip_connection_playbook(ip: str, agent_id: str = None) -> dict:
 
 @mcp.tool()
 def evaluate_domain_connection_playbook(domain: str, agent_id: str) -> dict:
+    """
+    Evaluate the connection to a malicious domain according to the playbook.
 
+    """
     result = {
         "domain": domain,
         "step1_domain_status": None,
@@ -1783,13 +1796,14 @@ def evaluate_domain_connection_playbook(domain: str, agent_id: str) -> dict:
 @mcp.tool()
 def process_malicious_playbook(commandline=None, path=None, hash=None, parent_commandline=None, parent_path=None):
     """
-    Đánh giá tiến trình có đáng ngờ hay không dựa trên:
-        - commandline
-        - đường dẫn file
-        - hash file
-        - commandline tiến trình cha
-        - đường dẫn file tiến trình cha
-        - user tạo tiến trình
+    Evaluate whether a process is suspicious based on:
+        - command line
+        - file path
+        - file hash
+        - parent process command line
+        - parent process file path
+        - user who created the process
+
     """
     result = {}
     
@@ -1867,16 +1881,18 @@ from collections import defaultdict
 @mcp.tool()
 def evaluate_login_ips(user: str, logon_type, ip_source) -> dict:
     """
-    Đánh giá alert liên quan đến việc user đăng nhập bất thường từ 1 ip
-    - Gom nhóm 500 event gần nhất của user.
-    - Kiểm tra IP xem nó có phải là vpn, độc, private
-    - Tính tần suất login từ các ip khác nhau của user 
-    Từ đó xác định TP/FP
+    Evaluate alerts related to a user logging in abnormally from an IP:
+        - Group the user's 500 most recent events.
+        - Check whether the IP is a VPN, malicious, or private.
+        - Calculate the frequency of logins from different IPs for the user.
+        From this, determine TP/FP (true positive / false positive).
+
     Args:
-        user: tên user cần kiểm tra
-    
+        user: the username to evaluate
+
     Returns:
-        dict: kết quả đánh giá
+        dict: evaluation result
+
     """
     result = {
         "user": user,
@@ -1954,13 +1970,14 @@ from collections import Counter
 @mcp.tool()
 def eveluate_analyze_bruteforce(user: str, target_host: str, protocol: str, ip_attack: str = None) -> dict:
     """
-    Đánh giá alert liên quan đến brute-force user cho cả Windows và Linux.
-    Các bước:
-    1. Lấy log fail/success từ search_alerts
-    2. Xác định IP tấn công, tần suất 5 phút
-    3. Kiểm tra brute-force thành công (fail nhiều → success đột ngột)
-    4. Kiểm tra FP: password expired, vừa đổi mật khẩu
-    5. Đánh giá nghiệp vụ (IP này login user này thường xuyên)
+    Evaluate alerts related to brute-force attempts on a user for both Windows and Linux.
+    Steps:
+        1. Retrieve fail/success logs from search_alerts
+        2. Identify the attacking IP and calculate its 5-minute frequency
+        3. Check for successful brute-force (many failures → sudden success)
+        4. Check for false positives: expired password, recently changed password
+        5. Business logic evaluation (this IP frequently logs in as this user)
+
     """
 
     result = {
