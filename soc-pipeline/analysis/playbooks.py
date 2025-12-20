@@ -1,43 +1,31 @@
 #!/usr/bin/env python3
 
-from integrations.virustotal import virustotal_check_url_safe, virustotal_check_file_hash
-
 
 def classify_phishing(alert):
-    """Classify phishing alerts based on URL checks and keywords."""
+    """Classify phishing alerts based on keywords (API calls moved to IOC checker)."""
     desc = (alert.get("rule", {}).get("description") or "").lower()
-    url = None
-    if alert.get("data"):
-        url = alert["data"].get("url") or alert["data"].get("uri")
     verdict = "FP"
-    reason = "No malicious URL found"
-    if url:
-        vt = virustotal_check_url_safe(url)
-        if vt.get("verdict") == "MALICIOUS":
-            verdict = "TP"
-            reason = f"VirusTotal flagged URL {url}"
-    elif "phish" in desc or "email" in desc:
+    reason = "No phishing indicators found"
+    
+    # Keyword-based classification only
+    if "phish" in desc or "email" in desc or "suspicious" in desc:
         verdict = "TP"
         reason = "Rule contains phishing/email keywords"
+    
     return {"category": "phishing", "classification": verdict, "reason": reason}
 
 
 def classify_malware(alert):
-    """Classify malware alerts based on file hash checks and keywords."""
+    """Classify malware alerts based on keywords (API calls moved to IOC checker)."""
     desc = (alert.get("rule", {}).get("description") or "").lower()
-    file_hash = None
-    if alert.get("data"):
-        file_hash = alert["data"].get("sha256") or alert["data"].get("md5") or alert["data"].get("sha1")
     verdict = "FP"
-    reason = "No malicious file found"
-    if file_hash:
-        vt = virustotal_check_file_hash(file_hash)
-        if vt.get("verdict") == "MALICIOUS":
-            verdict = "TP"
-            reason = f"VirusTotal flagged hash {file_hash}"
-    elif any(k in desc for k in ("malware", "trojan", "ransom", "virus")):
+    reason = "No malware indicators found"
+    
+    # Keyword-based classification only
+    if any(k in desc for k in ("malware", "trojan", "ransom", "virus", "backdoor", "rootkit")):
         verdict = "TP"
         reason = "Rule description indicates malware"
+    
     return {"category": "malware", "classification": verdict, "reason": reason}
 
 

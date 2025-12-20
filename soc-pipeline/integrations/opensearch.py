@@ -21,7 +21,14 @@ def fetch_alerts_since(ts: str, size: int = 500):
             "bool": {
                 "must": [
                     {"range": {"@timestamp": {"gt": ts}}},
-                    {"term": {"agent.name": "DESKTOP-JP58I0C"}}
+                    {
+                        "terms": {
+                            "agent.name": [
+                                "DESKTOP-JP58I0C",
+                                "Ubuntu-WebServer"
+                            ]
+                        }
+                    }
                 ]
             }
         },
