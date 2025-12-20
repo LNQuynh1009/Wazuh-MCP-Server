@@ -58,19 +58,7 @@ def virustotal_check_domain(domain: str):
             # with open("check_domain_result.json", "w") as f:
             #     json.dump(attributes, f, indent=4)
             return attributes
-            # return {
-            #     "domain": domain,
-            #     "reputation": attributes.get("reputation"),
-            #     "categories": attributes.get("categories"),
-            #     "last_analysis_stats": attributes.get("last_analysis_stats"),
-            #     "malicious": attributes.get("last_analysis_stats", {}).get("malicious", 0),
-            #     "suspicious": attributes.get("last_analysis_stats", {}).get("suspicious", 0),
-            #     "harmless": attributes.get("last_analysis_stats", {}).get("harmless", 0),
-            #     "undetected": attributes.get("last_analysis_stats", {}).get("undetected", 0),
-            #     "creation_date": attributes.get("creation_date"),
-            #     "last_update_date": attributes.get("last_update_date"),
-            #     "verdict": "MALICIOUS" if attributes.get("last_analysis_stats", {}).get("malicious", 0) > 0 else "CLEAN"
-            # }
+
         elif response.status_code == 404:
             return {"domain": domain, "verdict": "NOT_FOUND", "message": "Domain not found in VirusTotal database"}
         else:
@@ -115,7 +103,7 @@ def evaluate_domain_playbook(domain: str):
     3. Google presence (basic heuristic)
     4. HTTP access test
     """
-    print(f"\n=== ĐÁNH GIÁ DOMAIN: {domain} ===")
+    # print(f"\n=== ĐÁNH GIÁ DOMAIN: {domain} ===")
 
     # Normalize domain
     parsed = urlparse(domain)

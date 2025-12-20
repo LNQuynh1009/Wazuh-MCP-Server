@@ -108,7 +108,7 @@ def check_ip2location(ip: str):
         ip: IP address to check (e.g., '
     """
     try:
-        print(IP2LOCATION_API_KEY)
+        # print(IP2LOCATION_API_KEY)
         response = requests.get(f"https://api.ip2location.io/?key={IP2LOCATION_API_KEY}&ip={ip}&format=json")
         if response.status_code == 200:
             data = response.json()
@@ -328,7 +328,7 @@ def evaluate_ip_threat(ip: str):
         result["reason"].append("Không đủ bằng chứng để kết luận.")
 
     return result
-print(evaluate_ip_threat("209.50.174.77"))
+print(evaluate_ip_threat("52.123.129.14"))
  
 # print(abuseipdb_check_ip("111.243.135.27"))
     

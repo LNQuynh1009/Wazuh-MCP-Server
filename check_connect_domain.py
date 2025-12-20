@@ -260,7 +260,7 @@ def evaluate_domain_connection_playbook(domain: str, agent_id: str):
         "Domain bị VT đánh dấu độc" if domain_is_malicious 
         else "Domain không bị VT đánh dấu độc"
     )
-
+    
     # ============================================
     # BƯỚC 2 – LẤY TẤT CẢ TIẾN TRÌNH TRUY VẤN DOMAIN
     # ============================================
@@ -314,7 +314,9 @@ def evaluate_domain_connection_playbook(domain: str, agent_id: str):
     # ============================================
     # BƯỚC 3 – TẦN SUẤT
     # ============================================
-    freq_logs = search_alerts(f'*"{domain}"*', size=500)
+    # query_check = f'*{domain}*'
+    # print("QUERY FREQ:", query_check)
+    freq_logs = search_alerts(f'*{domain}*', size=500)
     device_set = {l.get("agent", {}).get("id") for l in freq_logs}
     query_count = len(freq_logs)
 

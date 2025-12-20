@@ -59,35 +59,7 @@ def virustotal_check_file_hash(file_hash: str):
             return {"error": f"VT API error {response.status_code}: {response.text}"}
     except Exception as e:
         return {"error": str(e)}
-     
-def search_alerts(query: str, size: int = 100):
-    """Run a search query directly against the OpenSearch Wazuh alert indices."""
-    host = os.getenv("OPENSEARCH_HOST")
-    port = os.getenv("OPENSEARCH_PORT", "9200")
-    user = os.getenv("OPENSEARCH_USER")
-    password = os.getenv("OPENSEARCH_PASS")
-    verify_ssl = os.getenv("OPENSEARCH_SSL_VERIFY", "true").lower() == "true"
-    
-    url = f"{host}:{port}/wazuh-alerts-*/_search"
-    payload = {
-        "size": size,
-        "query": {
-            "query_string": {
-                "query": query
-            }
-        },
-        "sort": [{"@timestamp": {"order": "desc"}}]
-    }
-    
-    response = requests.get(url, auth=HTTPBasicAuth(user, password), json=payload, verify=verify_ssl)
-    if response.status_code != 200:
-        return {"error": response.text}
-    
-    data = response.json()
-    hits = [hit["_source"] for hit in data.get("hits", {}).get("hits", [])]
-    # print(hits)
-    return hits
-    
+
 def check_file_vt_info(file_hash):
     """
     Kiểm tra hash file trên VirusTotal và chuẩn hóa dữ liệu đầu ra
@@ -125,35 +97,6 @@ def check_file_vt_info(file_hash):
         "threat": threat,
         "vt_raw": vt
     }
-
-def check_file_path(path):
-    """
-    Kiểm tra đường dẫn file xem có nằm trong thư mục nhạy cảm
-    và có phần mở rộng thực thi nguy hiểm hay không.
-
-    Args:
-        path: đường dẫn file
-
-    Returns:
-        Dict với crit2: "OK" hoặc cảnh báo file thực thi trong thư mục nhạy cảm
-    """
-    path_lc = path.lower()
-
-    dangerous_exts = [".exe", ".dll", ".bat", ".cmd", ".vbs", ".js", ".ps1", ".sh"]
-    suspicious_dirs = [
-        "c:/", "windows/system32", "windows/syswow64", "programdata",
-        "program files", "appdata", "localappdata", "users/public", "temp"
-    ]
-
-    _, ext = os.path.splitext(path_lc)
-
-    in_sensitive_dir = any(i in path_lc.replace("\\", "/") for i in suspicious_dirs)
-    is_exec = ext in dangerous_exts
-
-    if in_sensitive_dir and is_exec:
-        return {"crit2": "File thực thi nằm trong thư mục nhạy cảm"}
-
-    return {"crit2": "OK"}
 
 def check_filename_reputation(name):
     """
@@ -304,20 +247,37 @@ def check_file_creator_user(filename):
     Returns:
         Dict với crit4: thông tin user tạo file hoặc cảnh báo
     """
+    check = "OK"
     user_info = get_user_from_wazuh_logs(filename)
 
     user = user_info.get("user")
 
     if not user:
-        return {"crit4": "Không xác định được user", "detail": user_info}
+        return {"crit4": "Không xác định được user", "detail": user_info, "check": "Undefined"}
 
     # User dịch vụ → nguy cơ exploit
-    suspicious_users = ["www-data", "apache", "nginx", "mysql", "system", "network service"]
+    suspicious_users = [
+        # Linux service users
+        "www-data", "apache", "nginx", "mysql", "postgres", "mongodb",
+        "ftp", "sshd", "daemon", "nobody",
+
+        # Windows builtin service accounts (đã bỏ SYSTEM)
+        "localservice", "nt authority\\local service",
+        "networkservice", "nt authority\\network service",
+
+        # Windows server components
+        "trustedinstaller", "iis apppool\\defaultapppool",
+        "sqlserveragent", "ms_sqlserver",
+
+        # Common low-privilege or background accounts
+        "defaultaccount", "guest", "wdagutilityaccount"
+    ]
 
     if str(user).lower() in suspicious_users:
-        return {"crit4": "File do user dịch vụ tạo — có thể bị exploit", "detail": user_info}
+        check = "Malicious"
+        return {"crit4": "File do user dịch vụ tạo — có thể bị exploit", "detail": user_info, }
 
-    return {"crit4": f"User tạo file: {user}", "detail": user_info}
+    return {"crit4": f"User tạo file: {user}", "detail": user_info, "check": check}
 def summarize_playbook(results):
     """
     Tổng hợp kết quả các tiêu chí kiểm tra file và đưa ra kết luận cuối.
@@ -334,18 +294,19 @@ def summarize_playbook(results):
     if malicious >= 25:
         return "=> KẾT LUẬN: CHẮC CHẮN LÀ MÃ ĐỘC"
 
-    if 5 <= malicious < 25:
+    elif 5 <= malicious < 25:
         return "=> KẾT LUẬN: NGHI NGỜ MẠNH (Có thể là crack/hacktool)"
 
-    if results["crit2"] != "OK":
+    elif results["crit2"] != "OK":
         return "=> KẾT LUẬN: File thực thi trong thư mục nhạy cảm → nguy cơ cao"
 
-    if "đáng ngờ" in results["crit3"].lower():
+    elif "đáng ngờ" in results["crit3"].lower():
         return "=> KẾT LUẬN: Tên file nguy hiểm → cần phân tích thêm"
 
-    if "exploit" in results["crit4"].lower():
+    elif "exploit" in results["crit4"].lower():
         return "=> KẾT LUẬN: File được tạo bởi user dịch vụ → nguy cơ bị tấn công"
-
+    elif malicious == 0 and results["crit2"] == "OK" and "đáng ngờ" not in results["crit3"].lower() and  "exploit" not in results["crit4"].lower():
+        return "CLEAN"
     return "=> KẾT LUẬN: KHÔNG ĐỦ DỮ LIỆU, ĐỀ XUẤT TẢI FILE VỀ PHÂN TÍCH"
 
 def check_file_playbook(file_hash, path):
@@ -371,8 +332,8 @@ def check_file_playbook(file_hash, path):
     result["crit1"] = r1
 
     # tiêu chí 2
-    r2 = check_file_path(path)
-    result["crit2"] = r2["crit2"]
+    r2 = is_suspicious_executable(path)
+    result["crit2"] = r2
 
     # tiêu chí 3
     r3 = check_filename_reputation(r1.get("name"))
@@ -381,14 +342,169 @@ def check_file_playbook(file_hash, path):
     # tiêu chí 4
     filename = os.path.basename(path)
     r4 = check_file_creator_user(filename)
+
     result["crit4"] = r4["crit4"]
 
     # tiêu chí 5
     conclusion = summarize_playbook(result)
     result["conclusion"] = conclusion
 
+    if "CLEAN" in conclusion:
+        result["final_verdict"] = "FP"
+    else:
+        result["final_verdict"] = "TP"
     return result
+# ============================================
+# CHECK PROCESS MALICIOUS
+# ============================================
+def is_suspicious_executable(path):
+    """
+    Kiểm tra đường dẫn file xem có nằm trong thư mục nhạy cảm
+    và có phần mở rộng thực thi nguy hiểm hay không,
+    nhưng loại trừ các file nằm trong whitelist.
 
+    Args:
+        path: đường dẫn file
+
+    Returns:
+        True nếu file đáng ngờ, False nếu an toàn
+    """
+    path_lc = path.lower().replace("\\\\", "/")
+
+    # === Các phần mở rộng nguy hiểm ===
+    dangerous_exts = [".exe", ".dll", ".bat", ".cmd", ".vbs", ".js", ".ps1", ".sh"]
+
+    # === Các thư mục nhạy cảm ===
+    suspicious_dirs = [
+        "c:/", "windows/system32", "windows/syswow64", "programdata",
+        "program files", "appdata", "localappdata", "users/public", "temp",
+        "downloads"
+    ]
+
+    # === Whitelist: các đường dẫn tuyệt đối an toàn ===
+    # Whitelist: các đường dẫn tuyệt đối hợp lệ
+    WHITELIST_PATHS = [
+        # === Windows System Files ===
+        "C:/Windows/explorer.exe",
+        "C:/Windows/notepad.exe",
+        "C:/Windows/System32/cmd.exe",
+        "C:/Windows/System32/powershell.exe",
+        "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+        "C:/Windows/System32/wscript.exe",
+        "C:/Windows/System32/cscript.exe",
+        "C:/Windows/System32/mshta.exe",
+        "C:/Windows/System32/taskmgr.exe",
+        "C:/Windows/System32/services.exe",
+        "C:/Windows/System32/svchost.exe",
+        "C:/Windows/System32/mspaint.exe",
+        "C:/Windows/System32/winlogon.exe",
+        "C:/Windows/System32/explorerframe.dll",
+        "C:/Windows/System32/mmc.exe",
+        "C:/Windows/System32/eventvwr.exe",
+        "C:/Windows/System32/control.exe",
+        "C:/Windows/System32/taskschd.msc",
+        "C:/Windows/System32/perfmon.exe",
+        "C:/Windows/System32/regedit.exe",
+        "C:/Windows/System32/services.msc",
+        "C:/Windows/System32/compmgmt.msc",
+        "C:/Windows/System32/secpol.msc",
+        "C:/Windows/System32/dxdiag.exe",
+        "C:/Windows/System32/msconfig.exe",
+        "C:/Windows/System32/diskmgmt.msc",
+        "C:/Windows/System32/cleanmgr.exe",
+        "C:/Windows/System32/chkdsk.exe",
+        "C:/Windows/System32/sfc.exe",
+        "C:/Windows/System32/defrag.exe",
+        "C:/Windows/System32/attrib.exe",
+        "C:/Windows/System32/robocopy.exe",
+        "C:/Windows/System32/net.exe",
+        "C:/Windows/System32/nslookup.exe",
+        "C:/Windows/System32/tracert.exe",
+        "C:/Windows/System32/powershell_ise.exe",
+        "C:/Windows/System32/taskkill.exe",
+        "C:/Windows/System32/cmdkey.exe",
+        "C:/Windows/System32/fsutil.exe",
+        "C:/Windows/System32/diskpart.exe",
+        "C:/Windows/System32/reg.exe",
+        "C:/Windows/System32/wevtutil.exe",
+        "C:/Windows/System32/wmiadap.exe",
+        "C:/Windows/System32/winrm.exe",
+        # Defender
+        "C:/Program Files/Windows Defender/MsMpEng.exe",
+        "C:/Program Files/Windows Defender/MpCmdRun.exe",
+        "C:/Program Files/Windows Defender/MsSense.exe",
+        "C:/Program Files/Windows Defender/NisSrv.exe",
+        "C:/Program Files/Windows Defender/MSASCuiL.exe",
+        "C:/Windows/System32/WindowsDefender.dll",
+        # === Program Files / Safe Apps ===
+        "C:/Program Files/7-Zip/7zFM.exe",
+        "C:/Program Files/7-Zip/7z.exe",
+        "C:/Program Files/Google/Chrome/Application/chrome.exe",
+        "C:/Program Files/Mozilla Firefox/firefox.exe",
+        "C:/Program Files/Microsoft Office/root/Office16/WINWORD.EXE",
+        "C:/Program Files/Microsoft Office/root/Office16/EXCEL.EXE",
+        "C:/Program Files/Microsoft Office/root/Office16/POWERPNT.EXE",
+        "C:/Program Files/VLC/vlc.exe",
+        # === Program Files (x86) ===
+        "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+        "C:/Program Files (x86)/Mozilla Firefox/firefox.exe",
+        # === Python / Java / Development Tools ===
+        "C:/Python311/python.exe",
+        "C:/Python311/Scripts/pip.exe",
+        "C:/Program Files/Java/jdk-17/bin/java.exe",
+        "C:/Program Files/Java/jdk-17/bin/javac.exe",
+        # === Other common safe tools ===
+        "C:/Program Files/Git/bin/git.exe",
+        "C:/Program Files/Git/cmd/git.exe",
+        "C:/Program Files/Wireshark/Wireshark.exe"
+    ]
+    print(path_lc)
+    # Loại trừ whitelist
+    for safe_path in WHITELIST_PATHS:
+        if path_lc.startswith(("C:/ProgramData/Microsoft/Windows Defender").lower()):
+            return False
+        if path_lc == safe_path.lower().replace("\\", "/"):
+            return False
+
+    # Kiểm tra đuôi file
+    is_exec = any(path_lc.endswith(ext) for ext in dangerous_exts)
+
+    # Kiểm tra thư mục nhạy cảm
+    in_sensitive_dir = any(dir_str in path_lc for dir_str in suspicious_dirs)
+
+    # Nếu vừa là file thực thi vừa nằm trong thư mục nhạy cảm → đáng ngờ
+    if is_exec and in_sensitive_dir:
+        return True
+
+    return False
+
+def search_alerts(query: str, size: int = 100):
+    """Run a search query directly against the OpenSearch Wazuh alert indices."""
+    host = os.getenv("OPENSEARCH_HOST")
+    port = os.getenv("OPENSEARCH_PORT", "9200")
+    user = os.getenv("OPENSEARCH_USER")
+    password = os.getenv("OPENSEARCH_PASS")
+    verify_ssl = os.getenv("OPENSEARCH_SSL_VERIFY", "true").lower() == "true"
+    
+    url = f"{host}:{port}/wazuh-alerts-*/_search"
+    payload = {
+        "size": size,
+        "query": {
+            "query_string": {
+                "query": query
+            }
+        },
+        "sort": [{"@timestamp": {"order": "desc"}}]
+    }
+    
+    response = requests.get(url, auth=HTTPBasicAuth(user, password), json=payload, verify=verify_ssl)
+    if response.status_code != 200:
+        return {"error": response.text}
+    
+    data = response.json()
+    hits = [hit["_source"] for hit in data.get("hits", {}).get("hits", [])]
+    # print(hits)
+    return hits
 # print(get_user_from_wazuh_logs("floss.exe"))
 print(check_file_playbook("6d7f542ed46fcb02893a8672eb405d4b543e2a92db1ac22b5d53dbf303568b25", "C:/Users/admin/Downloads/mas_17-20230810T055912Z-001/mas_17-20230810T055912Z-001/mas_17/MAS_1.7_Password_1234/MAS_1.7/All-In-One-Version/MAS_AIO.cmd"))
 
