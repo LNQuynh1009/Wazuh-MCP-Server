@@ -159,16 +159,69 @@ def check_ip_vpn(ip) -> dict:
     }
 # print(check_ip_vpn("40.124.175.225"))
 
-@mcp.tool() #Tool đơn
-def evaluate_ip_threat(ip: str) -> dict:
+def virustotal_resolution_ip(ip: str, limit: int = 100):
     """
-    Evalaute ip follow playbook, returning only the results of the criteria (without including raw data).
+    Get domain resolutions for an IP from VirusTotal (with pagination)
+    """
+    if not VIRUSTOTAL_API_KEY:
+        return {"error": "VIRUSTOTAL_API_KEY not set in environment"}
+
+    headers = {
+        "accept": "application/json",
+        "x-apikey": VIRUSTOTAL_API_KEY
+    }
+
+    results = []
+    cursor = None
+
+    try:
+        while len(results) < limit:
+            params = {}
+            if cursor:
+                params["cursor"] = cursor
+
+            response = requests.get(
+                f"{VIRUSTOTAL_BASE_URL}/ip_addresses/{ip}/resolutions",
+                headers=headers,
+                params=params
+            )
+
+            if response.status_code != 200:
+                return {"error": f"VT API error {response.status_code}: {response.text}"}
+
+            body = response.json()
+
+            data = body.get("data", [])
+            results.extend(data)
+
+            # Cursor cho trang tiếp theo
+            cursor = body.get("meta", {}).get("cursor")
+
+            # Không còn trang nữa
+            if not cursor or not data:
+                break
+        a = []
+        for i in results:
+            rel_ip = i.get("attributes", {}).get("host_name")
+            a.append(rel_ip)
+
+        # return results[:limit]
+        return a[:limit]
+
+    except Exception as e:
+        return {"error": str(e)}
+
+@mcp.tool() #Tool đơn
+def evaluate_ip_threat_second(ip: str) -> dict:
+    """
+    Evaluate the IP according to the playbook, returning only the results of the criteria (without including raw data).
     """
 
     result = {
         "ip": ip,
         "criteria": {
             "domain_resolution": None,
+            "top10_domain_resolution": None,
             "virustotal": {},
             "crowdsource": None,
             "relations": None,
@@ -186,19 +239,22 @@ def evaluate_ip_threat(ip: str) -> dict:
     vt = virustotal_check_ip(ip)
     vt_attr = vt if isinstance(vt, dict) else {}
 
-    vt_dns = vt_attr.get("last_dns_records", [])
-    resolved_domains = [d.get("value") for d in vt_dns if d.get("value")]
+    resolved_domains = virustotal_resolution_ip(ip, 120)
 
+    top10_domain_resulution = []
+    if len(resolved_domains) < 10:
+        top10_domain_resulution = resolved_domains
+    else: 
+        top10_domain_resulution = resolved_domains[0:10]
+    result["criteria"]["top10_domain_resolution"] = top10_domain_resulution
     if len(resolved_domains) > 100:
         # nhiều domain con → hosting
-        roots = {dom.split(".")[-2:] for dom in resolved_domains if "." in dom}
-        if len(roots) > 10:
-            result["criteria"]["domain_resolution"] = "hosting"
-            result["verdict"] = "CLEAN"
-            result["reason"].append("IP resolve > 100 domain khác nhau → hosting → sạch.")
-            return result
+        result["criteria"]["domain_resolution"] = "hosting"
+        result["verdict"] = "CLEAN"
+        result["reason"].append("IP resolve > 100 domain khác nhau → hosting → sạch.")
+        return result
     else:
-        result["criteria"]["domain_resolution"] = "normal"
+        result["criteria"]["domain_resolution"] = "not ip hosting"
 
     # ======================================================
     # 1) VIRUSTOTAL
@@ -260,14 +316,20 @@ def evaluate_ip_threat(ip: str) -> dict:
     # ======================================================
     # 5) ABUSEIPDB — ISP / COUNTRY
     # ======================================================
-    country = abuse.get("countryName", None)
-    isp = abuse.get("isp", "").lower()
-    ip_type  = abuse.get("usageType", "").lower()
+    isp = "unknown"
+    ip_type = "unknown"
     isp_status = "unknown"
-    if any(x in isp for x in ["google", "microsoft", "amazon", "akamai", "cloudflare"]):
-        isp_status = "high_trust"
-    elif "viettel" in isp or "vnpt" in isp or "fpt" in isp:
-        isp_status = "vn_local"
+    country = "unknow"
+    if abuse:
+        country = abuse.get("countryName", None)
+        if abuse.get("isp", "") != None:
+            isp = abuse.get("isp", "").lower()
+            ip_type  = abuse.get("usageType", "").lower()
+        isp_status = "unknown"
+        if any(x in isp for x in ["google", "microsoft", "amazon", "akamai", "cloudflare"]):
+            isp_status = "high_trust"
+        elif "viettel" in isp or "vnpt" in isp or "fpt" in isp:
+            isp_status = "vn_local"
 
     result["criteria"]["abuseip_location"] = {
         "country": country,
@@ -329,6 +391,7 @@ def evaluate_ip_threat_second(ip: str) -> dict:
         "ip": ip,
         "criteria": {
             "domain_resolution": None,
+            "top10_domain_resolution": None,
             "virustotal": {},
             "crowdsource": None,
             "relations": None,
@@ -346,19 +409,22 @@ def evaluate_ip_threat_second(ip: str) -> dict:
     vt = virustotal_check_ip(ip)
     vt_attr = vt if isinstance(vt, dict) else {}
 
-    vt_dns = vt_attr.get("last_dns_records", [])
-    resolved_domains = [d.get("value") for d in vt_dns if d.get("value")]
+    resolved_domains = virustotal_resolution_ip(ip, 120)
 
+    top10_domain_resulution = []
+    if len(resolved_domains) < 10:
+        top10_domain_resulution = resolved_domains
+    else: 
+        top10_domain_resulution = resolved_domains[0:10]
+    result["criteria"]["top10_domain_resolution"] = top10_domain_resulution
     if len(resolved_domains) > 100:
         # nhiều domain con → hosting
-        roots = {dom.split(".")[-2:] for dom in resolved_domains if "." in dom}
-        if len(roots) > 10:
-            result["criteria"]["domain_resolution"] = "hosting"
-            result["verdict"] = "CLEAN"
-            result["reason"].append("IP resolve > 100 domain khác nhau → hosting → sạch.")
-            return result
+        result["criteria"]["domain_resolution"] = "hosting"
+        result["verdict"] = "CLEAN"
+        result["reason"].append("IP resolve > 100 domain khác nhau → hosting → sạch.")
+        return result
     else:
-        result["criteria"]["domain_resolution"] = "normal"
+        result["criteria"]["domain_resolution"] = "not ip hosting"
 
     # ======================================================
     # 1) VIRUSTOTAL
@@ -486,7 +552,7 @@ def evaluate_ip_threat_second(ip: str) -> dict:
 
     return result
 # print(check_ip_vpn("40.124.175.225"))
-# print(evaluate_ip_threat("40.124.175.225"))
+# print(evaluate_ip_threat_second("40.124.175.225"))
 # ============================================
 # CÁC HÀM KIỂM TRA DOMAIN
 # ============================================
@@ -762,7 +828,7 @@ def evaluate_domain_playbook_second(domain: str) -> dict:
         "details": details
         # "virustotal_data": vt_data
     }
-# print(evaluate_domain_playbook("facebook.com"))
+print(evaluate_domain_playbook_second("pool-hk.supportxmr.com"))
 # ============================================
 # CÁC HÀM KIỂM TRA FILE
 # ============================================
@@ -1059,7 +1125,7 @@ def summarize_playbook(results):
 # =======================================
 # PLAYBOOK FUNCTION - Kiểm tra file độc hại/bất thường
 # =======================================
-@mcp.tool() #Tool đơn
+@mcp.tool() #Tool single 
 def check_file_playbook(file_hash, path) -> dict:
     """
     Execute the entire file inspection playbook:
@@ -1254,6 +1320,44 @@ def check_process_malicious(process: str=None, path: str = None) -> bool:
 # ============================================
 # SEARCH ALERTS IN WAZUH
 # ============================================
+@mcp.tool()
+def ping():
+    """Test connection to Wazuh API."""
+    try:
+        token = get_wazuh_token()
+        return {"status": "ok", "token_length": len(token)}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+  
+@mcp.tool()
+def search_alerts_wazuh(query: str, size: int = 100):
+    """Run a search query directly against the OpenSearch Wazuh alert indices."""
+    host = os.getenv("OPENSEARCH_HOST")
+    port = os.getenv("OPENSEARCH_PORT", "9200")
+    user = os.getenv("OPENSEARCH_USER")
+    password = os.getenv("OPENSEARCH_PASS")
+    verify_ssl = os.getenv("OPENSEARCH_SSL_VERIFY", "true").lower() == "true"
+    
+    url = f"{host}:{port}/wazuh-alerts-*/_search"
+    payload = {
+        "size": size,
+        "query": {
+            "query_string": {
+                "query": query
+            }
+        },
+        "sort": [{"@timestamp": {"order": "desc"}}]
+    }
+    
+    response = requests.get(url, auth=HTTPBasicAuth(user, password), json=payload, verify=verify_ssl)
+    if response.status_code != 200:
+        return {"error": response.text}
+    
+    data = response.json()
+    hits = [hit["_source"] for hit in data.get("hits", {}).get("hits", [])]
+    # print(hits)
+    return hits
+
 def search_alerts(query: str, size: int = 100):
     """Run a search query directly against the OpenSearch Wazuh alert indices."""
     host = os.getenv("OPENSEARCH_HOST")
@@ -1505,156 +1609,6 @@ def evaluate_ip_connection_playbook(ip: str, agent_id: str = None) -> dict:
 
     return result
 
-
-# a = evaluate_ip_connection_playbook("52.123.129.14","001")
-# for key, value in a.items():
-#     print(f"{key}: {value}")
-
-
-# ======================================================
-# PLAYBOOK FUNCTIONS - CONNECT MALICIOUS DOMAIN   
-# ======================================================
-# def evaluate_domain_connection_playbook(domain: str, agent_id: str):
-#     """
-#     Đánh giá connect domain theo 4 bước SOC:
-#     B1: Đánh giá domain độc thật hay không (VirusTotal + heuristics)
-#     B2: LẤY TẤT CẢ TIẾN TRÌNH truy vấn domain --> đánh giá từng tiến trình
-#     B3: TẦN SUẤT truy vấn domain trên toàn hệ thống
-#     B4: Tổng hợp để ra verdict chung
-#     """
-
-#     result = {
-#         "domain": domain,
-#         "step1_domain_status": None,
-#         "step2_process_list": [],
-#         "step2_process_mal": [],
-#         "step2_process_status": None,
-#         "step3_log_status": None,
-#         "reason": None,
-#         "verdict": None
-#     }
-
-#     # ============================================
-#     # BƯỚC 1 – VirusTotal
-#     # ============================================
-#     vt = evaluate_domain_playbook(domain)
-
-#     if "error" in vt:
-#         result["step1_domain_status"] = f"Lỗi VT: {vt['error']}"
-#         result["verdict"] = "ESCALATE"
-#         result["reason"] = "Không đánh giá được VT → Escalate"
-#         return result
-
-#     domain_is_malicious = vt["verdict"] == "MALICIOUS"
-#     result["step1_domain_status"] = (
-#         "Domain bị VT đánh dấu độc" if domain_is_malicious 
-#         else "Domain không bị VT đánh dấu độc"
-#     )
-    
-#     # ============================================
-#     # BƯỚC 2 – LẤY TẤT CẢ TIẾN TRÌNH TRUY VẤN DOMAIN
-#     # ============================================
-#     query = f'*{domain}* AND agent.id:{agent_id}'
-#     logs = search_alerts(query, size=200)
-
-#     list_process_info = []
-#     list_process_mal = []
-#     tag_mal = 0
-#     if not logs:
-#         result["step2_process_status"].append("Không lấy được tiến trình nào trên endpoint")
-#     else:
-#         for log in logs:
-#             proc = log.get("data", {}).get("win", {}).get("eventdata", {})
-
-#             process_info = {
-#                 "originalFileName": proc.get("originalFileName"),
-#                 "image": proc.get("image"),
-#                 "commandLine": proc.get("commandLine"),
-#                 "hash": proc.get("hashes"),
-#                 "user": proc.get("user"),
-#                 "parentCommandLine": proc.get("parentCommandLine"),
-#                 "parentImage": proc.get("parentImage"),
-#                 "parentUser": proc.get("parentUser"),
-#             }
-#             tag1 = check_process_malicious(process_info.get("commandLine"), process_info.get("image"))
-#             tag2 = check_process_malicious(process_info.get("parentCommandLine"), process_info.get("parentImage"))
-#             if tag1 or tag2:
-#                 tag_mal += 1
-#                 list_process_mal.append(process_info)
-#             list_process_info.append(process_info)
-#         result["step2_process_list"] = list_process_info
-#         result["step2_process_mal"] = list_process_mal
-
-#         if tag_mal > 0:
-#             proc_status = "Phát hiện tiến trình đáng ngờ trên endpoint"
-            
-#         else:
-#             proc_status = "Không phát hiện tiến trình đáng ngờ trên endpoint"
-
-#         result["step3_process_analysis"] = proc_status
-
-#     # ============================================
-#     # BƯỚC 3 – TẦN SUẤT
-#     # ============================================
-#     # query_check = f'*{domain}*'
-#     # print("QUERY FREQ:", query_check)
-#     freq_logs = search_alerts(f'*{domain}*', size=500)
-#     device_set = {l.get("agent", {}).get("id") for l in freq_logs}
-#     query_count = len(freq_logs)
-
-#     if len(device_set) > 10:
-#         result["step3_log_status"] = "Tần suất cao → nghiệp vụ"
-#         freq_flag = "FP_MASS"
-#     elif len(device_set) == 1 and query_count > 20:
-#         result["step3_log_status"] = "1 máy query nhiều lần → nghi nhiễm"
-#         freq_flag = "SINGLE_INFECTED"
-#     elif len(device_set) == 1 and 3 <= query_count <= 5:
-#         result["step3_log_status"] = "1 máy query 3–5 lần → JS embedded"
-#         freq_flag = "JS_EMBED"
-#     else:
-#         result["step3_log_status"] = "Không bất thường"
-#         freq_flag = "NORMAL"
-
-#     # ============================================
-#     # BƯỚC 4 – TỔNG HỢP QUYẾT ĐỊNH
-#     # ============================================
-
-#     # CASE A: DOMAIN SẠCH
-#     if not domain_is_malicious:
-#         result["verdict"] = "FALSE_POSITIVE"
-
-#         if freq_flag == "FP_MASS":
-#             result["decision"] = "Domain sạch → nghiệp vụ"
-#         elif "BROWSER_QUERY_CLEAN" in process_tags:
-#             result["decision"] = "Domain sạch → browser query → JS/ads"
-#         else:
-#             result["decision"] = "Domain sạch → False Positive"
-
-#         return result
-
-#     # CASE B: DOMAIN ĐỘC
-#     if domain_is_malicious:
-
-#         if "NON_BROWSER_MALICIOUS_PROCESS" in process_tags:
-#             result["verdict"] = "MALICIOUS"
-#             result["decision"] = "Domain độc → tiến trình không phải browser → nghi mã độc"
-#             return result
-
-#         if "BROWSER_QUERY_MALICIOUS" in process_tags:
-#             result["verdict"] = "MALICIOUS"
-#             result["decision"] = "Domain độc → query bởi browser → nghi JS/extension/phishing"
-#             return result
-
-#         if "NO_PROCESS" in process_tags:
-#             result["verdict"] = "ESCALATE"
-#             result["decision"] = "Domain độc nhưng không lấy được tiến trình"
-#             return result
-
-#     # FALLBACK
-#     result["verdict"] = "ESCALATE"
-#     result["decision"] = "Không phân loại được → Escalate"
-#     return result
-
 @mcp.tool()
 def evaluate_domain_connection_playbook(domain: str, agent_id: str) -> dict:
     """
@@ -1873,6 +1827,10 @@ def process_malicious_playbook(commandline=None, path=None, hash=None, parent_co
     
     result["verdict"] = "MALICIOUS" if is_malicious else "CLEAN"
     result["reasons"] = reasons if reasons else ["Không phát hiện dấu hiệu đáng ngờ"]
+    if result["verdict"] == "MALICIOUS":
+        result["tag"] = "TP"
+    else:
+        result["tag"] = "FP"
 
     return result
 
@@ -1964,7 +1922,9 @@ def evaluate_login_ips(user: str, logon_type, ip_source) -> dict:
     return result
 
 
-from datetime import datetime, timedelta
+
+
+# from datetime import datetime
 from collections import Counter
 
 @mcp.tool()
@@ -1977,7 +1937,6 @@ def eveluate_analyze_bruteforce(user: str, target_host: str, protocol: str, ip_a
         3. Check for successful brute-force (many failures → sudden success)
         4. Check for false positives: expired password, recently changed password
         5. Business logic evaluation (this IP frequently logs in as this user)
-
     """
 
     result = {
@@ -2000,7 +1959,7 @@ def eveluate_analyze_bruteforce(user: str, target_host: str, protocol: str, ip_a
     }
 
     # =====================================================
-    # BƯỚC 0 – CHECK MỨC ĐỘ ĐỘC HẠI CỦA IP
+    # STEP 0 – CHECK THREAT LEVEL OF IP
     # =====================================================
     ip_is_malicious = False
     check_ip = None
@@ -2015,7 +1974,7 @@ def eveluate_analyze_bruteforce(user: str, target_host: str, protocol: str, ip_a
             result["reason"].append("IP tấn công bị đánh giá là độc (threat intelligence).")
 
     # =====================================================
-    # BƯỚC 1 – LẤY LOG FAIL / SUCCESS
+    # STEP 1 – FETCH FAIL / SUCCESS LOGS
     # =====================================================
     base_q = f"*{user}* AND *{target_host}* AND *{protocol}*"
 
@@ -2033,14 +1992,12 @@ def eveluate_analyze_bruteforce(user: str, target_host: str, protocol: str, ip_a
     result["event_count"] = len(fail_events)
 
     # =====================================================
-    # BƯỚC 2 – XÁC ĐỊNH IP TẤN CÔNG + TẦN SUẤT
+    # STEP 2 – IDENTIFY ATTACKING IP + FREQUENCY
     # =====================================================
     attacker_ips = []
 
     for e in fail_events:
-        # Windows
         ip = e["data"].get("win", {}).get("eventdata", {}).get("ipAddress")
-        # Linux
         if not ip:
             ip = e["data"].get("srcip")
         if ip:
@@ -2049,8 +2006,8 @@ def eveluate_analyze_bruteforce(user: str, target_host: str, protocol: str, ip_a
     attacker_ip = ip_attack if ip_attack else (Counter(attacker_ips).most_common(1)[0][0] if attacker_ips else "")
     result["attacker_ip"] = attacker_ip
 
-    # Xác định khoảng thời gian brute-force
-    times = sorted([datetime.fromisoformat(ev["timestamp"].replace("Z", "+00:00")) for ev in fail_events])
+    # Calculate brute-force time window
+    times = sorted([datetime.datetime.fromisoformat(ev["timestamp"].replace("Z", "+00:00")) for ev in fail_events])
     start = times[0]
     end = times[-1]
 
@@ -2060,16 +2017,16 @@ def eveluate_analyze_bruteforce(user: str, target_host: str, protocol: str, ip_a
     duration_seconds = (end - start).total_seconds()
 
     # =====================================================
-    # BƯỚC 2.5 – **NEW**: IP ĐỘC + TẦN SUẤT > NGƯỠNG → TRUE POSITIVE
+    # STEP 2.5 – MALICIOUS IP + HIGH FREQUENCY → TRUE POSITIVE
     # =====================================================
     if ip_is_malicious:
-        if result["event_count"] >= 20 and duration_seconds <= 300:  # 20 lần / 5 phút
-            result["verdict"] = "TRUE_POSITIVE"
+        if result["event_count"] >= 20 and duration_seconds <= 300:  # 20 events / 5 min
+            result["verdict"] = "TP"
             result["reason"].append("IP độc + tần suất tấn công cao → brute-force thực sự.")
             return result
 
     # =====================================================
-    # BƯỚC 3 – SUCCESS LOGINS TRÊN MÁY ĐÍCH
+    # STEP 3 – SUCCESSFUL LOGINS ON TARGET
     # =====================================================
     for ev in success_events:
         ip = (
@@ -2083,13 +2040,13 @@ def eveluate_analyze_bruteforce(user: str, target_host: str, protocol: str, ip_a
     result["successful_logins_by_ip"][attacker_ip] = len(recent_success)
 
     # =====================================================
-    # BƯỚC 4 – PASSWORD EXPIRED / PASSWORD CHANGE
+    # STEP 4 – PASSWORD EXPIRED / PASSWORD CHANGE
     # =====================================================
     q_expired = f"*4625* AND *{user}* AND *0xC0000071*"
     expired_events = search_alerts(q_expired, size=500)
     if expired_events:
         result["password_expired"] = True
-        result["verdict"] = "FALSE_POSITIVE"
+        result["verdict"] = "FP"
         result["reason"].append("Password expired → False Positive.")
         return result
 
@@ -2097,16 +2054,19 @@ def eveluate_analyze_bruteforce(user: str, target_host: str, protocol: str, ip_a
     changed_events = search_alerts(q_changed, size=500)
 
     if changed_events:
-        last_change = max([datetime.fromisoformat(ev["timestamp"].replace("Z", "+00:00")) for ev in changed_events])
+        last_change = max([
+            datetime.datetime.fromisoformat(ev["timestamp"].replace("Z", "+00:00"))
+            for ev in changed_events
+        ])
         result["user_password_last_change"] = str(last_change)
 
         if abs((start - last_change).total_seconds()) <= 300:
-            result["verdict"] = "FALSE_POSITIVE"
+            result["verdict"] = "FP"
             result["reason"].append("User vừa đổi mật khẩu → cache mật khẩu cũ gây fail.")
             return result
 
     # =====================================================
-    # BƯỚC 5 – SUCCESS ĐỘT NGỘT SAU FAIL NHIỀU
+    # STEP 5 – SUDDEN SUCCESS AFTER MANY FAILS
     # =====================================================
     if result["successful_logins_on_target"]:
         result["verdict"] = "TRUE_POSITIVE"
@@ -2114,28 +2074,28 @@ def eveluate_analyze_bruteforce(user: str, target_host: str, protocol: str, ip_a
         return result
 
     # =====================================================
-    # BƯỚC 6 – KIỂM TRA NGHIỆP VỤ
+    # STEP 6 – BUSINESS LOGIC
     # =====================================================
     if result["successful_logins_by_ip"][attacker_ip] >= 3:
-        result["verdict"] = "LIKELY_LEGIT"
+        result["verdict"] = "FP"
         result["reason"].append("IP này thường xuyên login user này trước đó (nghiệp vụ).")
         return result
 
     # =====================================================
-    # BƯỚC 7 – ESCALATE / MONITOR
+    # STEP 7 – ESCALATE / MONITOR
     # =====================================================
     if result["event_count"] < 20:
-        result["verdict"] = "MONITOR"
+        result["verdict"] = "FP"
         result["reason"].append("Tần suất thấp → theo dõi thêm.")
         return result
 
-    result["verdict"] = "ESCALATE"
-    result["reason"].append("Bruteforce mạnh, không thuộc FP.")
+    result["verdict"] = "TP"
+    result["reason"].append("Bruteforce mạnh, cần escalate.")
     return result
 
 
-if __name__ == "__main__":
-    print(f"Starting Wazuh MCP server on {BASE_URL}...")
-    print(f"VirusTotal API: {'Configured' if VIRUSTOTAL_API_KEY else 'Not configured'}")
-    print(f"AbuseIPDB API: {'Configured' if ABUSEIPDB_API_KEY else 'Not configured'}")
-    mcp.run()
+# if __name__ == "__main__":
+#     print(f"Starting Wazuh MCP server on {BASE_URL}...")
+#     print(f"VirusTotal API: {'Configured' if VIRUSTOTAL_API_KEY else 'Not configured'}")
+#     print(f"AbuseIPDB API: {'Configured' if ABUSEIPDB_API_KEY else 'Not configured'}")
+#     mcp.run()
