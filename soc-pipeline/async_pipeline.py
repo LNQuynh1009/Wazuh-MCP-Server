@@ -4,6 +4,7 @@ import time
 import json
 import asyncio
 import aiohttp
+import signal
 from datetime import datetime
 
 from config import POLL_INTERVAL_SECONDS, MAX_FETCH
@@ -25,7 +26,21 @@ from analysis.async_ai_classifier import async_claude_classify_alert
 from analysis.hybrid import hybrid_merge
 
 
-async def async_process_single_alert(alert, ioc_cache, session: aiohttp.ClientSession):
+class PipelineState:
+    """Shared state for the pipeline to track timestamps and shutdown signal."""
+    def __init__(self, last_ts):
+        self.last_ts = last_ts
+        self.shutdown_requested = False
+        self.lock = asyncio.Lock()
+    
+    async def update_timestamp(self, ts):
+        """Thread-safe timestamp update and save."""
+        async with self.lock:
+            self.last_ts = ts
+            save_last_timestamp(ts)
+
+
+async def async_process_single_alert(alert, ioc_cache, session: aiohttp.ClientSession, state: 'PipelineState' = None):
     """Process a single alert with concurrent AI + IOC checking."""
     ts = alert.get("@timestamp") or datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     
@@ -83,6 +98,9 @@ async def async_process_single_alert(alert, ioc_cache, session: aiohttp.ClientSe
             result = await async_thehive_create_alert(payload, session)
             if result.get("success"):
                 print(f"[+] Sent TP alert to TheHive: {alert.get('rule',{}).get('id')}")
+                # Save timestamp immediately after successful send
+                if state:
+                    await state.update_timestamp(ts)
             else:
                 print(f"[!] Error sending to TheHive: {result.get('error')}")
         except Exception as e:
@@ -91,16 +109,21 @@ async def async_process_single_alert(alert, ioc_cache, session: aiohttp.ClientSe
     return ts
 
 
-async def async_process_alert_batch(alerts, ioc_cache, session: aiohttp.ClientSession, batch_size=10):
+async def async_process_alert_batch(alerts, ioc_cache, session: aiohttp.ClientSession, state: 'PipelineState', batch_size=10):
     """Process multiple alerts concurrently in batches."""
     last_ts = None
     
     # Process alerts in batches to avoid overwhelming the system
     for i in range(0, len(alerts), batch_size):
+        # Check if shutdown was requested
+        if state.shutdown_requested:
+            print(f"[*] Shutdown requested, stopping after batch {i//batch_size}")
+            break
+            
         batch = alerts[i:i + batch_size]
         
         # Process batch concurrently
-        tasks = [async_process_single_alert(alert, ioc_cache, session) for alert in batch]
+        tasks = [async_process_single_alert(alert, ioc_cache, session, state) for alert in batch]
         timestamps = await asyncio.gather(*tasks, return_exceptions=True)
         
         # Get the latest timestamp from this batch
@@ -120,38 +143,58 @@ async def async_alert_streamer(poll_interval=POLL_INTERVAL_SECONDS, max_batch=MA
     print(f"[+] Starting from last timestamp: {last_ts}")
     ioc_cache = load_ioc_cache()
     
+    # Create pipeline state
+    state = PipelineState(last_ts)
+    
+    # Set up signal handler for graceful shutdown
+    def signal_handler(sig, frame):
+        """Handle SIGINT (Ctrl+C) gracefully."""
+        print("\n[!] Shutdown signal received (Ctrl+C). Finishing current tasks...")
+        state.shutdown_requested = True
+    
+    # Register signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+    
     # Create a single aiohttp session for connection pooling
     async with aiohttp.ClientSession() as session:
         try:
-            while True:
+            while not state.shutdown_requested:
                 try:
                     # Fetch alerts synchronously (OpenSearch client is sync)
-                    alerts = fetch_alerts_since(last_ts, size=max_batch)
+                    alerts = fetch_alerts_since(state.last_ts, size=max_batch)
                 except Exception as e:
                     print(f"[!] Error fetching alerts: {e}")
-                    time.sleep(poll_interval)
+                    await asyncio.sleep(poll_interval)
                     continue
                 
                 if not alerts:
-                    time.sleep(poll_interval)
+                    await asyncio.sleep(poll_interval)
                     continue
                 
                 print(f"[*] Fetched {len(alerts)} alerts, processing with concurrency={concurrent_alerts}")
                 
                 # Process alerts asynchronously in batches
                 try:
-                    new_last_ts = await async_process_alert_batch(alerts, ioc_cache, session, batch_size=concurrent_alerts)
+                    new_last_ts = await async_process_alert_batch(alerts, ioc_cache, session, state, batch_size=concurrent_alerts)
                     
-                    if new_last_ts:
-                        last_ts = new_last_ts
-                        save_last_timestamp(last_ts)
+                    # Update last_ts from state (in case it was updated during processing)
+                    if new_last_ts and new_last_ts > state.last_ts:
+                        await state.update_timestamp(new_last_ts)
                     
                     # Save IOC cache after each batch
                     save_ioc_cache(ioc_cache)
                 except Exception as e:
                     print(f"[!] Error processing batch: {e}")
                 
-                time.sleep(poll_interval)
-        except KeyboardInterrupt:
-            print("[*] Stopped by user. Saving cache.")
+                # Check shutdown before sleeping
+                if state.shutdown_requested:
+                    break
+                    
+                await asyncio.sleep(poll_interval)
+        finally:
+            # Always save state on exit
+            print("[*] Shutting down gracefully...")
+            print(f"[*] Last processed timestamp: {state.last_ts}")
+            save_last_timestamp(state.last_ts)
             save_ioc_cache(ioc_cache)
+            print("[*] State saved. Goodbye!")
