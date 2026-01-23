@@ -1,4 +1,4 @@
-# Wazuh-MCP-Server
+# SmartSOC
 The server.py is to run a mcp server to connect to wazuh.
 The features are still being developed.
 To use it please config your claude_desktop_config.json.
